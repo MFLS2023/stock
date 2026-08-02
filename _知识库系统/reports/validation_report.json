@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T01:12:09.139834+00:00",
+  "generated_at": "2026-08-02T07:12:31.188069+00:00",
   "passed": 11,
   "total": 11,
   "success": true,
@@ -12,22 +12,22 @@
     {
       "name": "来源登记",
       "passed": true,
-      "detail": "登记来源数=3"
+      "detail": "登记来源数=4"
     },
     {
       "name": "文件 manifest",
       "passed": true,
-      "detail": "记录数=529"
+      "detail": "记录数=530"
     },
     {
       "name": "全部来源内容入库",
       "passed": true,
-      "detail": "{\"fulibei\": {\"documents\": 110, \"parents\": 441, \"chunks\": 1444}, \"nanjinglu_bian\": {\"documents\": 42, \"parents\": 80, \"chunks\": 525}, \"tulip_garden\": {\"documents\": 42, \"parents\": 155, \"chunks\": 1181}}"
+      "detail": "{\"fulibei\": {\"documents\": 110, \"parents\": 441, \"chunks\": 1444}, \"nanjinglu_bian\": {\"documents\": 42, \"parents\": 80, \"chunks\": 525}, \"tulip_garden\": {\"documents\": 42, \"parents\": 155, \"chunks\": 1181}, \"panfeng\": {\"documents\": 29, \"parents\": 60, \"chunks\": 186}}"
     },
     {
       "name": "统一检索块",
       "passed": true,
-      "detail": "块数=3150"
+      "detail": "块数=3336"
     },
     {
       "name": "检索块字段",
@@ -47,12 +47,12 @@
     {
       "name": "索引记录数一致",
       "passed": true,
-      "detail": "SQLite={\"documents\": 194, \"parents\": 676, \"chunks\": 3176} JSONL={\"documents\": 194, \"parents\": 676, \"chunks\": 3176}"
+      "detail": "SQLite={\"documents\": 223, \"parents\": 736, \"chunks\": 3362} JSONL={\"documents\": 223, \"parents\": 736, \"chunks\": 3362}"
     },
     {
       "name": "样例检索",
       "passed": true,
-      "detail": "{\"情绪周期\": 516, \"仓位 回撤\": 481, \"92科比\": 88, \"筹码\": 415, \"弱转强\": 111}"
+      "detail": "{\"情绪周期\": 516, \"仓位 回撤\": 497, \"92科比\": 88, \"筹码\": 422, \"弱转强\": 111}"
     },
     {
       "name": "项目 Skills",

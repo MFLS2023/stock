@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-08-02T05:58:05.665980+00:00",
+  "source_id": "panfeng",
+  "html_file": "C:\\Users\\20577\\Documents\\炒股\\知识库\\飞书聊天记录_潘凤\\飞书聊天记录_共3445条.html",
+  "sha256": "7afb5b376c8c08c99e60361674c615e39d95d7eafecfc145e5b02804b586d220",
+  "html_groups": 16,
+  "messages": 3445,
+  "documents": 29,
+  "parents": 60,
+  "chunks": 186,
+  "date_start": "2026-06-23",
+  "date_end": "2026-07-31",
+  "message_dates": 29,
+  "speakers": {
+    "5280": 119,
+    "我有上将潘凤": 3326
+  },
+  "images": 0,
+  "external_links": 0,
+  "date_and_cleaning_stats": {
+    "header_absolute_date": 10,
+    "redundant_signatures_removed": 1047,
+    "header_clock": 4,
+    "market_day_rollovers": 23,
+    "unknown_time_inherited": 2,
+    "header_relative_date": 2,
+    "anchor_gap_max_days": 1,
+    "anchor_gap_over_one_day": 0
+  }
+}

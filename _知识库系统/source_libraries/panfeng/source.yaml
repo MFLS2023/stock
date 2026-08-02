@@ -1,0 +1,17 @@
+id: panfeng
+display_name: 我有上将潘凤
+source_path: 飞书聊天记录_潘凤
+source_type: feishu_chat_html
+status: integrated
+approved_on: '2026-08-02'
+original_policy: read_only
+primary_locator: date_time_message_number
+pipeline: speaker_time_aware_html
+adapter: specialized_feishu_chat
+author: 我有上将潘凤
+format_counts:
+  .html: 1
+review_required: false
+complexity_signals:
+- 连续消息继承发言人，日期需由绝对日期锚点和组内时间回绕重建
+notes: 飞书HTML连续消息导出；保留发言人、重建交易日日期、继承unknown时间，并按消息编号引用。

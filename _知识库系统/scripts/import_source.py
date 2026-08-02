@@ -51,6 +51,11 @@ def main() -> int:
         run(command)
     elif adapter == "specialized_fulibei":
         raise RuntimeError("复利杯依赖既有逐稿成果和参数化导入器；请使用 import_fulibei.py 的专用参数。")
+    elif adapter == "specialized_feishu_chat":
+        command = [sys.executable, str(SCRIPTS / "import_feishu_chat.py")]
+        if args.force:
+            command.append("--force")
+        run(command)
     elif adapter == "specialized" or source.get("review_required") and source.get("adapter") == "specialized":
         raise RuntimeError("该来源已标记为需要专用适配器，不能用通用导入器静默处理。")
     else:

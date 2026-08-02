@@ -38,3 +38,23 @@ sources:
     pipeline: word_plus_ordered_ocr
     adapter: specialized_tulip
     notes: Word 正文与大量截图并存，必须恢复图片顺序和图文关系，视觉内容需回看原图。
+
+  # id 用作者身份而非资料载体：飞书只是这批资料的导出格式，换个载体来源还是同一个人。
+  # source_type / adapter 仍带 feishu，那两个描述结构和解析能力，可被其他飞书导出复用。
+  - id: panfeng
+    display_name: 我有上将潘凤
+    source_path: 飞书聊天记录_潘凤
+    source_type: feishu_chat_html
+    status: integrated
+    approved_on: '2026-08-02'
+    original_policy: read_only
+    primary_locator: date_time_message_number
+    pipeline: speaker_time_aware_html
+    adapter: specialized_feishu_chat
+    author: 我有上将潘凤
+    format_counts:
+      .html: 1
+    review_required: false
+    complexity_signals:
+      - 连续消息继承发言人，日期需由绝对日期锚点和组内时间回绕重建
+    notes: 飞书HTML连续消息导出；保留发言人、重建交易日日期、继承unknown时间，并按消息编号引用。
