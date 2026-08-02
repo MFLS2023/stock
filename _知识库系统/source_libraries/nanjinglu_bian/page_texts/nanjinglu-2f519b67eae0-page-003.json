@@ -5,8 +5,12 @@
   "method": "ocr",
   "confidence": "medium",
   "text": "2026 / 3 / 29 13 : 05 情绪分歧中走强乐至彼岸祝老板一路长虹 ! 喜欢作者作者提示 : 个人观点 , 仅供参考 https://mp•weixm•qq.com/s/M3EMvkXmSH)4ap9vEh_2NQ",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 105,
   "ocr_chars": 99,
+  "embedded_cjk_ratio": 0.314,
+  "ocr_cjk_ratio": 0.343,
   "ocr_error": "",
   "ocr_tiles": 1
 }

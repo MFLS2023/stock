@@ -2,11 +2,15 @@
   "source_hash": "9134a2e16f5e7a65317479ae9673e48986548931dbe0b85b04f7905bb09a42a7",
   "dpi": 140,
   "page": 2,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "模仿的。我一开始说的\nZJDR\n然后\nHBGF",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "模仿的。 我一开始说的 ZJD HBGF , 占囗 0 」 0 刂公众号 · 彼岸写字的地方公众号 · 彼岸写字的地方",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 20,
   "ocr_chars": 46,
+  "embedded_cjk_ratio": 0.55,
+  "ocr_cjk_ratio": 0.696,
   "ocr_error": "",
   "ocr_tiles": 1
 }

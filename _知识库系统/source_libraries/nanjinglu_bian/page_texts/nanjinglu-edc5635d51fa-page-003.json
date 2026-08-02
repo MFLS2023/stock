@@ -2,11 +2,15 @@
   "source_hash": "edc5635d51faf75f1303fc0dc475a701449764c2d7c1d7e06638ba914eaf4b2c",
   "dpi": 140,
   "page": 3,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "2026/3/29 13:07 春暖等待花开\nhttps://mp.weixin.qq.com/s/M19dhBNhsrhs9AbYWvrs1g 3/3",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "2026 / 3 / 29 13 : 07 https://mp.weixm.qq.com/s/M19dhBNhsrhs9AbYWvrslg 春暖等待花开",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 72,
   "ocr_chars": 68,
+  "embedded_cjk_ratio": 0.083,
+  "ocr_cjk_ratio": 0.088,
   "ocr_error": "",
   "ocr_tiles": 1
 }

@@ -2,11 +2,15 @@
   "source_hash": "e49a48979ab4244523697a8b314d1c99b04f91ec1c251b5842cd8b2ced16cf4d",
   "dpi": 140,
   "page": 4,
-  "method": "embedded_fallback",
-  "confidence": "low",
+  "method": "embedded",
+  "confidence": "high",
   "text": "作者提示: 个人观点,仅供参考\n阅读 1377\n复盘合集 · 目录\n上一篇·夏的热烈\n元宝AI,帮你大大提高工作效率!\n元宝\n立即体验\n广告",
+  "ocr_residue": "篡盘合集 . 目录作者提示 : 个人观点 , 仅供参考阅读 1377 0 @过名朽同匚 < 上一篇 . 夏的热烈元宝 AI , 帮你大大提高工作效率 !\n刚入职要处理十份 E e 《数据立即体验",
+  "ocr_residue_chars": 76,
   "embedded_chars": 59,
   "ocr_chars": 76,
+  "embedded_cjk_ratio": 0.797,
+  "ocr_cjk_ratio": 0.763,
   "ocr_error": "",
   "ocr_tiles": 1
 }

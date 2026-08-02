@@ -5,8 +5,12 @@
   "method": "ocr",
   "confidence": "medium",
   "text": ". 93 丑玛軚 2 〕 25 」 〕 不 09 27 . 的 2 & 33 26 们 3 25B7 25 . 32 24 . g7 24 旧 2 24 , 27 23 . 92 23 . 57 23 . 21 禪 253 551 引 44145 331 22 囗 72 11036 0@30 卖三 25 . 卖一 24m 买一买三 9.gg% 8 、 56 % 7 . 1 4 % 25 乇 4 2B5 % 1 . 43 % 0 的囗 % 1 . 43 % 2 旧 5 % 4 . 28 % 571 % 7 . 1 4 % & 56 % 2 °C 亿 1 7 亿 1 4 亿 1 . 1 亿 8 引 5 万",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 0,
   "ocr_chars": 186,
+  "embedded_cjk_ratio": 0.0,
+  "ocr_cjk_ratio": 0.151,
   "ocr_error": "",
   "ocr_tiles": 1
 }

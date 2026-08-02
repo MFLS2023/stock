@@ -5,8 +5,12 @@
   "method": "ocr",
   "confidence": "medium",
   "text": ": 1 「 哐五回 U 刂 ] 8 」 E 卖五卖三卖 0 头一 1000 14 nn 头五 13 °C 0 涨幅 12 外手 1 1 5 . 22 1 5 」 ? 1 2 9 万量比 1 3 万门 1 “ 本 2 流旧 《训亡动续费达信昔及版 ILUU 1 4 4 1 5 . 1 2 1 1 ? 1 1 刂 1 」 丐 1 1 刂 1 1 5 1 1 5 ] 5 , 1 5 1 4 5 300 1 4 : 5 5 1 5 . 2 4 1 4 , 5 5 1 4 , 5 5 1 3 3 ] 2 艺 GU. 1 囗 & O 1 ? ] n T 3 《 3 3 目 & 2 2 囗 & O 1 5 2 0 b 下 1 n 7 fil. 1 5",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 31,
   "ocr_chars": 183,
+  "embedded_cjk_ratio": 0.0,
+  "ocr_cjk_ratio": 0.235,
   "ocr_error": "",
   "ocr_tiles": 1
 }

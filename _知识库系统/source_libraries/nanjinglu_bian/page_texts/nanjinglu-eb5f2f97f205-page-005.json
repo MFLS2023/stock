@@ -5,8 +5,12 @@
   "method": "embedded_fallback",
   "confidence": "low",
   "text": "",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 0,
   "ocr_chars": 0,
+  "embedded_cjk_ratio": 0.0,
+  "ocr_cjk_ratio": 0.0,
   "ocr_error": "",
   "ocr_tiles": 1
 }

@@ -65,6 +65,72 @@ def meaningful_char_count(text: str) -> int:
     return len(re.sub(r"\s+", "", text or ""))
 
 
+def cjk_ratio(text: str) -> float:
+    """Share of CJK characters among non-whitespace characters.
+
+    A PDF text layer with a broken font maps glyphs to arbitrary code points, so it
+    extracts as mostly non-CJK bytes (``_|\\笉颫\\x17{y``). Chinese prose scores well
+    above 0.5, damaged text layers well below it, which separates the two reliably
+    even when the damaged layer reports a healthy character count.
+    """
+    stripped = re.sub(r"\s+", "", text or "")
+    if not stripped:
+        return 0.0
+    return len(re.findall(f"[{CJK}]", stripped)) / len(stripped)
+
+
+def subtract_known_text(ocr_text: str, embedded_text: str, *, min_line_chars: int = 6) -> str:
+    """Drop OCR lines that merely re-read text already captured by the text layer.
+
+    Rendering a whole PDF page OCRs both the article prose and any screenshots pasted
+    into it. The prose is already available — and cleaner — from the text layer, so
+    only the screenshot-only lines are worth keeping as a separate low-confidence
+    block. Matching is fuzzy because OCR misreads characters (赚 as 賺) that would
+    defeat exact comparison.
+
+    Short lines are always kept: they carry too little signal to match reliably, and
+    dropping them risks losing real screenshot content.
+    """
+    if not ocr_text:
+        return ""
+    if not embedded_text:
+        return ocr_text
+    # Index the text layer as overlapping character n-grams so a sentence can be
+    # recognised regardless of how OCR happened to break lines.
+    window = 8
+    reference = re.sub(r"\s+", "", embedded_text)
+    known = {reference[start:start + window] for start in range(max(1, len(reference) - window + 1))}
+
+    def already_known(sentence: str) -> bool:
+        compact = re.sub(r"\s+", "", sentence)
+        if len(compact) < window:
+            return False
+        grams = [compact[start:start + window] for start in range(len(compact) - window + 1)]
+        hits = sum(gram in known for gram in grams)
+        # OCR misreads a few characters per sentence, which breaks some n-grams but
+        # leaves most intact; a clear majority of matches means it is a re-read.
+        return hits / len(grams) >= 0.6
+
+    kept: list[str] = []
+    for sentence in re.split(r"(?<=[。！？；!?;\n])", ocr_text):
+        stripped = sentence.strip()
+        if not stripped:
+            continue
+        if meaningful_char_count(stripped) < min_line_chars or not already_known(stripped):
+            kept.append(stripped)
+    return clean_text("\n".join(kept), ocr=True)
+
+
+def text_layer_is_usable(text: str, *, min_chars: int = 50, min_cjk_ratio: float = 0.5) -> bool:
+    """Whether a PDF text layer can be used directly instead of running OCR.
+
+    Rendering and OCRing a page that already carries good text costs time and
+    introduces recognition errors, so OCR is reserved for pages whose text layer is
+    empty, too short to be a real page, or corrupted by font-encoding problems.
+    """
+    return meaningful_char_count(text) >= min_chars and cjk_ratio(text) >= min_cjk_ratio
+
+
 def infer_topics(title: str, text: str, limit: int = 6) -> list[str]:
     haystack = f"{title}\n{text[:12000]}".casefold()
     scores: list[tuple[int, str]] = []

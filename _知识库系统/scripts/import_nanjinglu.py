@@ -17,6 +17,7 @@ from pypdf import PdfReader
 
 from kb_import_utils import (
     ROOT,
+    cjk_ratio,
     clean_text,
     clean_title,
     extract_date,
@@ -25,6 +26,8 @@ from kb_import_utils import (
     natural_key,
     ocr_images,
     split_text,
+    subtract_known_text,
+    text_layer_is_usable,
     write_jsonl,
 )
 
@@ -97,6 +100,9 @@ def load_cache(path: Path, source_hash: str, dpi: int) -> dict | None:
         item.get("source_hash") == source_hash
         and item.get("dpi") == dpi
         and not (item.get("method") == "embedded_fallback" and item.get("ocr_error"))
+        # Caches written before dual-layer extraction lack ocr_residue and would
+        # silently drop the screenshot content, so treat them as stale.
+        and "ocr_residue" in item
     ):
         return item
     return None
@@ -114,6 +120,7 @@ def extract_pdf(
     *,
     dpi: int,
     threshold: int,
+    cjk_threshold: float,
     force: bool,
 ) -> tuple[list[dict], list[dict]]:
     reader = PdfReader(path)
@@ -133,15 +140,11 @@ def extract_pdf(
             except Exception as exc:
                 embedded = ""
                 errors.append({"document_id": doc_id, "page": index, "stage": "embedded", "error": str(exc)})
-            if meaningful_char_count(embedded) >= threshold:
-                item = {
-                    "source_hash": source_hash, "dpi": dpi, "page": index, "method": "embedded",
-                    "confidence": "high", "text": embedded, "embedded_chars": meaningful_char_count(embedded),
-                    "ocr_chars": 0, "ocr_error": "",
-                }
-                save_cache(cache_path, item)
-                pages[index - 1] = item
-                continue
+            # These PDFs mix article prose (carried by the text layer) with pasted
+            # market screenshots (only reachable through OCR), so a page is not an
+            # either/or choice. Every page is rendered and OCRed; a usable text layer
+            # is kept alongside as the high-confidence copy of the prose.
+            usable = text_layer_is_usable(embedded, min_chars=threshold, min_cjk_ratio=cjk_threshold)
             try:
                 image_path = render_work / f"page-{index:03d}.png"
                 render_pdf_page(path, index, image_path, dpi)
@@ -150,7 +153,8 @@ def extract_pdf(
                 pages[index - 1] = {
                     "source_hash": source_hash, "dpi": dpi, "page": index, "method": "pending_ocr",
                     "confidence": "low", "text": embedded, "embedded_chars": meaningful_char_count(embedded),
-                    "ocr_chars": 0, "ocr_error": "",
+                    "ocr_chars": 0, "ocr_error": "", "embedded_usable": usable,
+                    "embedded_cjk_ratio": round(cjk_ratio(embedded), 3),
                 }
             except Exception as exc:
                 errors.append({"document_id": doc_id, "page": index, "stage": "render", "error": str(exc)})
@@ -172,16 +176,31 @@ def extract_pdf(
                 ocr_text = clean_text(ocr_item.get("text", ""), ocr=True)
                 embedded_count = meaningful_char_count(embedded)
                 ocr_count = meaningful_char_count(ocr_text)
-                use_ocr = ocr_count >= max(80, int(embedded_count * 0.75))
+                embedded_usable = bool(pending.get("embedded_usable"))
+                if embedded_usable:
+                    # Keep the clean text layer for the prose and only the OCR lines it
+                    # does not already cover, which is the screenshot content.
+                    residue = subtract_known_text(ocr_text, embedded)
+                    method, confidence, primary = "embedded", "high", embedded
+                else:
+                    # Nothing trustworthy in the text layer, so OCR carries the page.
+                    residue = ""
+                    method, confidence, primary = "ocr", "medium", ocr_text
+                    if not ocr_text:
+                        method, confidence, primary = "embedded_fallback", "low", embedded
                 item = {
                     "source_hash": source_hash,
                     "dpi": dpi,
                     "page": index,
-                    "method": "ocr" if use_ocr else "embedded_fallback",
-                    "confidence": "medium" if use_ocr else "low",
-                    "text": ocr_text if use_ocr else embedded,
+                    "method": method,
+                    "confidence": confidence,
+                    "text": primary,
+                    "ocr_residue": residue,
+                    "ocr_residue_chars": meaningful_char_count(residue),
                     "embedded_chars": embedded_count,
                     "ocr_chars": ocr_count,
+                    "embedded_cjk_ratio": round(cjk_ratio(embedded), 3),
+                    "ocr_cjk_ratio": round(cjk_ratio(ocr_text), 3),
                     "ocr_error": ocr_item.get("error", ""),
                     "ocr_tiles": ocr_item.get("tiles", 0),
                 }
@@ -219,7 +238,16 @@ def extract_image(path: Path, doc_id: str, source_hash: str, *, force: bool) -> 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dpi", type=int, default=140)
-    parser.add_argument("--embedded-threshold", type=int, default=500)
+    parser.add_argument(
+        "--embedded-threshold", type=int, default=50,
+        help="Minimum text-layer characters for a page to skip OCR (was 500, which "
+             "forced OCR on pages averaging 385 characters of good native text)",
+    )
+    parser.add_argument(
+        "--embedded-cjk-ratio", type=float, default=0.5,
+        help="Minimum CJK share of the text layer; below this the layer is treated as "
+             "font-encoding garbage and the page is sent to OCR",
+    )
     parser.add_argument("--force", action="store_true", help="Ignore persistent page OCR caches")
     args = parser.parse_args()
 
@@ -258,7 +286,8 @@ def main() -> int:
         elif path.suffix.lower() == ".pdf":
             try:
                 pages, page_errors = extract_pdf(
-                    path, doc_id, digest, dpi=args.dpi, threshold=args.embedded_threshold, force=args.force
+                    path, doc_id, digest, dpi=args.dpi, threshold=args.embedded_threshold,
+                    cjk_threshold=args.embedded_cjk_ratio, force=args.force,
                 )
                 errors.extend(page_errors)
             except Exception as exc:
@@ -271,19 +300,27 @@ def main() -> int:
         normalized_parts: list[str] = []
         units: list[dict] = []
         for page in pages:
-            extraction_counts[page.get("method", "unknown")] += 1
             page_number = int(page.get("page", 1))
-            page_text = clean_text(page.get("text", ""), ocr=page.get("method") == "ocr")
-            if not page_text:
-                continue
-            normalized_parts.append(f"[第{page_number}页 | {page.get('method', 'unknown')}]\n{page_text}")
-            for segment in split_text(page_text, 1200):
-                units.append(
-                    {
-                        "page_start": page_number, "page_end": page_number, "text": segment,
-                        "method": page.get("method", "unknown"), "confidence": page.get("confidence", "low"),
-                    }
-                )
+            page_method = page.get("method", "unknown")
+            # A page contributes up to two layers: the primary text (clean prose from
+            # the text layer, or OCR when there is no usable layer) and, for mixed
+            # pages, the OCR-only screenshot content kept at lower confidence.
+            layers = [(page_method, page.get("confidence", "low"), page.get("text", ""))]
+            if page.get("ocr_residue"):
+                layers.append(("ocr_screenshot", "low", page["ocr_residue"]))
+            for method, confidence, raw_text in layers:
+                page_text = clean_text(raw_text, ocr=method.startswith("ocr"))
+                if not page_text:
+                    continue
+                extraction_counts[method] += 1
+                normalized_parts.append(f"[第{page_number}页 | {method}]\n{page_text}")
+                for segment in split_text(page_text, 1200):
+                    units.append(
+                        {
+                            "page_start": page_number, "page_end": page_number, "text": segment,
+                            "method": method, "confidence": confidence,
+                        }
+                    )
 
         normalized_text = "\n\n".join(normalized_parts).strip()
         text_path = LIB / "texts" / f"{doc_id}.txt"
@@ -324,7 +361,8 @@ def main() -> int:
                     {
                         "source_id": SOURCE_ID, "source_name": SOURCE_NAME, "document_id": doc_id,
                         "parent_id": parent_id, "chunk_id": f"{parent_id}-c{child_number:02d}",
-                        "chunk_type": "article", "title": title, "date": date, "author_or_guest": "南京路彼岸",
+                        "chunk_type": "screenshot_ocr" if unit["method"] == "ocr_screenshot" else "article",
+                        "title": title, "date": date, "author_or_guest": "南京路彼岸",
                         "topics": topics, "claim_type": "opinion_or_case", "market_regime": "未标注",
                         "locator": page_locator(unit["page_start"], unit["page_end"]),
                         "page_start": unit["page_start"], "page_end": unit["page_end"], "text": unit["text"],

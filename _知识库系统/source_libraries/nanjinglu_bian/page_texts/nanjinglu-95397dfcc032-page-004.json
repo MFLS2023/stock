@@ -5,8 +5,12 @@
   "method": "ocr",
   "confidence": "medium",
   "text": "今天你会去接楚天龙和金一吗 ? 天分时 2 疒 1 / 2E 2 2F 4S 2& 囗 5 2 丬 7 囗 2 忄 3S 23 目目 23E4 2 已 2 目 22 4 2258 囗 54 鬥 SOSSS 5 囗 4E3 4 囗 37 囗 3 囗 278 2 囗 1 85 1 開 g3 囗 g : 3 囗 1J3 卩畲一文化分时 221070 176 50 132E42 3 42B 44214 1 4 : 到 27 24 0 1 」 到囗 % 囗囗 1 3 生 29 1 4 上亿 1 8 亿 1 亿 26 万糾 84 万霪 42 力 475 1 . 1 亿 9152 万 7322 万",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 14,
   "ocr_chars": 191,
+  "embedded_cjk_ratio": 0.929,
+  "ocr_cjk_ratio": 0.314,
   "ocr_error": "",
   "ocr_tiles": 1
 }

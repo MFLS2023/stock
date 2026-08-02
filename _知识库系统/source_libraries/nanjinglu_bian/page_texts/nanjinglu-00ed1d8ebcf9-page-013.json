@@ -2,11 +2,15 @@
   "source_hash": "00ed1d8ebcf9fb13b6082ddd5a89b5ac6eedca9bc32aee7d24214d7804ac6649",
   "dpi": 140,
   "page": 13,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "可以看到截至1月9日收盘,基本都还是这些面孔\n消息上多重视机构关注的重点,进行叠加",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "可以看到截至 1 月 9 日收盘 , 基本都还是这些面孔消息上多重视机构关注的重点 , 进行叠加",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 40,
   "ocr_chars": 40,
+  "embedded_cjk_ratio": 0.9,
+  "ocr_cjk_ratio": 0.9,
   "ocr_error": "",
   "ocr_tiles": 1
 }

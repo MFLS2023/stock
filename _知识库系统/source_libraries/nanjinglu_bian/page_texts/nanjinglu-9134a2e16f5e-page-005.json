@@ -2,11 +2,15 @@
   "source_hash": "9134a2e16f5e7a65317479ae9673e48986548931dbe0b85b04f7905bb09a42a7",
   "dpi": 140,
   "page": 5,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "SQXC\n这是不是就是模仿,一波多倍\n趋势,收极少的阴 k。\nDXDF",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "公众号 · 彼写字的地方 SQXC 趋势 , 收极少的阴 kø DXDF 这是不是就是模仿 , 一波多倍 1 Ci",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 31,
   "ocr_chars": 44,
+  "embedded_cjk_ratio": 0.613,
+  "ocr_cjk_ratio": 0.636,
   "ocr_error": "",
   "ocr_tiles": 1
 }

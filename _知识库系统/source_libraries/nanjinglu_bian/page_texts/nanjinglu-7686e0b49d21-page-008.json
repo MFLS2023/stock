@@ -2,11 +2,15 @@
   "source_hash": "7686e0b49d217f697986b94672826bf88fa5fbed37a2a50dc86db5560d339c46",
   "dpi": 140,
   "page": 8,
-  "method": "embedded_fallback",
-  "confidence": "low",
+  "method": "embedded",
+  "confidence": "high",
   "text": "重要提示!以上推演受限于本人的能力,模拟盘推演,不构成投资建\n议,大家一定要看到市场确实出现信号再决定是否参与,股市有风险\n,投资需谨慎。\n精选留言\n暂无...",
+  "ocr_residue": "重要提示 !\n精选留言暂无一",
+  "ocr_residue_chars": 12,
   "embedded_chars": 76,
   "ocr_chars": 74,
+  "embedded_cjk_ratio": 0.868,
+  "ocr_cjk_ratio": 0.905,
   "ocr_error": "",
   "ocr_tiles": 1
 }

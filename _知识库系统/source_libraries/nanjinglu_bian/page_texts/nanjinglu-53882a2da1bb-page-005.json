@@ -5,8 +5,12 @@
   "method": "ocr",
   "confidence": "medium",
   "text": "目前存在这样雏形的个月殳 . 是 2 46 DDN JRW JBF 公众号孚的地方 SLY 公众号 《 0 野亨的地方 27 70 一一 , 公众号 · 岸写字的地方 ZJD 23 . 60 + 十凸亡 16 . 66 公众号岸写字的地方",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 34,
   "ocr_chars": 89,
+  "embedded_cjk_ratio": 0.324,
+  "ocr_cjk_ratio": 0.573,
   "ocr_error": "",
   "ocr_tiles": 1
 }

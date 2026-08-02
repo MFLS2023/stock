@@ -5,8 +5,12 @@
   "method": "ocr",
   "confidence": "medium",
   "text": "到 0 汾 0 可蘇名粽》 个三霧红公式庙述 # 距 150 云内高 35 % 数 1 . 4 《 5 一 8 《数 9 一 12 《数 13 一 16 丨复跸列》 独设兰 : 公过类型且地类型版本 @二二] 「 用于吒云公便所据全部公式标筌 1 °C 0 2 3 50 〕 . 00 150 °C 0 KD12g:—EXIDATA IJSER(I PS D12U : 。 012U / ( RPS D12 。 93 0250 : 。 E TD ] LA IJSER ( 2 PS D250 : 。 H025 / ( PS D25 ” 9 ! ; 12 塹的 RP , 1 ) ; { RPS12 于 93 , . . 〈 25 塹的 PS 》 巧巧 ` 1 ) ; { RI 25 , 大于尸彗巧大的 R 》 RPS5ß 丿 《十 9 . 另存为涩果 KDSO:—EXTDQTQ USER(3 的 RPSKD5ß:—KD5ß/ F(RPSKDSO<9ß ß 1 卜 D KD12 〔 灕后 : 引用 1 号 《 O 的序列鲞 RPSKDI 2 〔 值 ; K0120 / 10 户@030401279 旧 K 10 值 : 如果 RPSKD120 跹 = 93 , 叵 0 K02 氕匾 : 引用 2 号 0 的列数据 R K025 〔 《自 : K0250 / 10 三线红的公式 : KDI 20:=EXTDATA USER(1,0);{120 天的 RPS} RPSKD120 : = KD120 / 10 ; KDOI:=IF(RPSKDI 20 < = 93 , 0 , 1 ) ; { RPSI 20 大于 93L KD250:=EXTDATA USER(2,0);{250 天的 RPS} RPSKD250 : = KD250 / 10 ; KD02:=lF(RPSKD250< = 9s0 , 1 ) ; { RPS250 大于 95L KD50:=EXTDATA USER(3,0);{50 天的 RPS} RPSKD50:=KD50/10; KD03 : = 下 ( RPSKD50 < 90 , 0 , 1); { RPS50 大于 90L KDI:=KDOI AND KD02 AND KD03; JJXG:=H/HHV(HlGH,N)>0.85; KDI AND JJXG;",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 383,
   "ocr_chars": 743,
+  "embedded_cjk_ratio": 0.052,
+  "ocr_cjk_ratio": 0.17,
   "ocr_error": "",
   "ocr_tiles": 1
 }

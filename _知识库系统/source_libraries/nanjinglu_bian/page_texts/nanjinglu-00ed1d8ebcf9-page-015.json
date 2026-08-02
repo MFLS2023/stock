@@ -2,11 +2,15 @@
   "source_hash": "00ed1d8ebcf9fb13b6082ddd5a89b5ac6eedca9bc32aee7d24214d7804ac6649",
   "dpi": 140,
   "page": 15,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "12月9日的三线红:",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "1 2 月 9 日的三线红 .",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 10,
   "ocr_chars": 10,
+  "embedded_cjk_ratio": 0.6,
+  "ocr_cjk_ratio": 0.6,
   "ocr_error": "",
   "ocr_tiles": 1
 }

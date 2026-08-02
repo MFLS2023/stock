@@ -13,7 +13,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from kb_import_utils import merge_short_units, span_locator
+from kb_import_utils import (
+    cjk_ratio,
+    merge_short_units,
+    span_locator,
+    subtract_known_text,
+    text_layer_is_usable,
+)
 
 
 def unit(locator: str, text: str, **extra) -> dict:
@@ -138,6 +144,69 @@ class MergeShortUnitsTests(unittest.TestCase):
             max_chars=800,
         )
         self.assertEqual(merged[0]["locator"].count("—"), 1)
+
+
+class TextLayerQualityTests(unittest.TestCase):
+    # Real samples taken from nanjinglu_bian PDFs: a broken embedded font extracts
+    # as arbitrary code points while reporting a plausible character count.
+    GARBLED = "成飞周期弹性的表现:\n_|\\笉颫\x17{y\x00+\x00V\x00\n\x00c\x00x\x00b\x001\x003\x000\x004"
+    PROSE = "虽然知道这是短线相当强的信号，但这种方法当然就不适合去追涨，那为什么这里是关键。"
+
+    def test_cjk_ratio_separates_prose_from_garbage(self):
+        self.assertGreater(cjk_ratio(self.PROSE), 0.8)
+        self.assertLess(cjk_ratio(self.GARBLED), 0.5)
+
+    def test_cjk_ratio_on_empty_input(self):
+        self.assertEqual(cjk_ratio(""), 0.0)
+        self.assertEqual(cjk_ratio("   \n\t "), 0.0)
+
+    def test_usable_prose_skips_ocr(self):
+        self.assertTrue(text_layer_is_usable(self.PROSE * 2, min_chars=50))
+
+    def test_garbled_layer_falls_through_to_ocr(self):
+        self.assertFalse(text_layer_is_usable(self.GARBLED * 4, min_chars=50))
+
+    def test_blank_and_short_pages_fall_through_to_ocr(self):
+        self.assertFalse(text_layer_is_usable("", min_chars=50))
+        self.assertFalse(text_layer_is_usable("只有几个字。", min_chars=50))
+
+    def test_old_default_would_have_rejected_good_pages(self):
+        # 385 characters was the measured average for pages that the previous
+        # threshold of 500 pushed into OCR.
+        page = "这是一段正常的中文正文内容。" * 28  # ~392 chars
+        self.assertFalse(text_layer_is_usable(page, min_chars=500))
+        self.assertTrue(text_layer_is_usable(page, min_chars=50))
+
+
+class SubtractKnownTextTests(unittest.TestCase):
+    PROSE = (
+        "这次首次提出的“算电协同”新基建，作为新的基础设施投资，"
+        "东数西算的进一步延伸，统筹就地建设利用绿电的数据中心完成消纳。"
+    )
+    SCREENSHOT = "《关于促进人工智能与能源双向赋能的行动方案》。其中指出，统筹优化能源资源与算力布局。"
+
+    def test_drops_lines_the_text_layer_already_covers(self):
+        residue = subtract_known_text(self.PROSE, self.PROSE)
+        self.assertEqual(residue, "")
+
+    def test_keeps_screenshot_only_content(self):
+        residue = subtract_known_text(f"{self.PROSE}\n{self.SCREENSHOT}", self.PROSE)
+        self.assertIn("行动方案", residue)
+        self.assertNotIn("东数西算", residue)
+
+    def test_tolerates_ocr_misreads_in_repeated_prose(self):
+        # OCR corrupts a few characters but the sentence is still a re-read.
+        garbled = self.PROSE.replace("统筹", "统箅").replace("消纳", "消細")
+        self.assertEqual(subtract_known_text(garbled, self.PROSE), "")
+
+    def test_empty_inputs(self):
+        self.assertEqual(subtract_known_text("", self.PROSE), "")
+        self.assertEqual(subtract_known_text(self.SCREENSHOT, ""), self.SCREENSHOT)
+
+    def test_short_lines_are_always_kept(self):
+        # Too little signal to match reliably; dropping them risks losing real content.
+        residue = subtract_known_text(f"{self.PROSE}\n5板", self.PROSE)
+        self.assertIn("5板", residue)
 
 
 if __name__ == "__main__":

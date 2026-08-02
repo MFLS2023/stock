@@ -2,11 +2,15 @@
   "source_hash": "00ed1d8ebcf9fb13b6082ddd5a89b5ac6eedca9bc32aee7d24214d7804ac6649",
   "dpi": 140,
   "page": 19,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "首先航天不存在跳水一说 , 宇宙空间里就没有水 , 何来跳水。 火箭向下运动那不叫下跌 , 那叫转进 , 换个方向继续前进 , 卫星调整那不是结束 , 而是变轨。",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 0,
   "ocr_chars": 68,
+  "embedded_cjk_ratio": 0.0,
+  "ocr_cjk_ratio": 0.882,
   "ocr_error": "",
   "ocr_tiles": 1
 }

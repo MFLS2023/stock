@@ -2,11 +2,15 @@
   "source_hash": "c0bf0cd2860cf65cb861b01a31fdfba4e84c131314b0548cc6dfb70907b83ac7",
   "dpi": 140,
   "page": 10,
-  "method": "embedded_fallback",
-  "confidence": "low",
+  "method": "embedded",
+  "confidence": "high",
   "text": "随后化工的周期强不强\n去年十一月底是谁极致的对抗负反馈?是不是航天发展\nO\u0017{y\u0000+\u0000V\u0000\n\u00001\u00003\u00000\u00004\u00000\u00001\u00002\u00007\u00009\u00000\u00001",
+  "ocr_residue": "冒琶上的 10 丰亡 .3@I、 彙闩 o-ou 就 0 冈十的 ] @当4 邓 S 过 0 〗 1 的 5 随后化工的周期强不强去年十一月底是谁极致的癍皮 ?\n是不是航天发展 13040127901",
+  "ocr_residue_chars": 78,
   "embedded_chars": 65,
   "ocr_chars": 78,
+  "embedded_cjk_ratio": 0.508,
+  "ocr_cjk_ratio": 0.59,
   "ocr_error": "",
   "ocr_tiles": 1
 }

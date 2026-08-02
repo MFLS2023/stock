@@ -2,11 +2,15 @@
   "source_hash": "2087cb416807855b9fbde5f6266f7f4aa8a76126f8223e636e4083f571bbb08d",
   "dpi": 140,
   "page": 4,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "彭祉铭安徽3天前\n明天又可以继续聚焦了",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "彭祉铭安徽 3 天前明天又可以继续聚焦了",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 18,
   "ocr_chars": 18,
+  "embedded_cjk_ratio": 0.944,
+  "ocr_cjk_ratio": 0.944,
   "ocr_error": "",
   "ocr_tiles": 1
 }

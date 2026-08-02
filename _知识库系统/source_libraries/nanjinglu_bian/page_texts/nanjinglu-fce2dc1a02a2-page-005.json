@@ -2,11 +2,15 @@
   "source_hash": "fce2dc1a02a2afccfa4af80354da1adc346a1ae4e9156c744b863b95b88995de",
   "dpi": 140,
   "page": 5,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "在这游戏里,氪佬也得给技术流大佬点赞!\n手机反恐特别行动\n进入小游戏\n广告",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "在这游戏里 , 氪佬也得给技术流大佬点赞 ! 手机反恐特别行动进入小游戏",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 34,
   "ocr_chars": 32,
+  "embedded_cjk_ratio": 0.941,
+  "ocr_cjk_ratio": 0.938,
   "ocr_error": "",
   "ocr_tiles": 1
 }

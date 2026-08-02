@@ -5,8 +5,12 @@
   "method": "ocr",
   "confidence": "medium",
   "text": "A 垤过 ~ 扌和践种唁的喜敦 1 嗎 0 2 就 12 / 2 120 0 , L 斗計 0 刂烁眉厂也 03 + 均 i 最新 4 指以 1 女斗曜 4 T 最的满指量 2 杰 81 众筹 + v 13040127901 2 5 年 1 1 月底 .",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 39,
   "ocr_chars": 83,
+  "embedded_cjk_ratio": 0.077,
+  "ocr_cjk_ratio": 0.458,
   "ocr_error": "",
   "ocr_tiles": 1
 }

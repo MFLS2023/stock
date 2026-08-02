@@ -2,11 +2,15 @@
   "source_hash": "c0bf0cd2860cf65cb861b01a31fdfba4e84c131314b0548cc6dfb70907b83ac7",
   "dpi": 140,
   "page": 18,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "是否在孕育新生?什么在盘面中率先抵抗呢?你有没复盘到这点。\n三线红呢?\nO\u0017{y\u0000+\u0000V\u0000\n\u00001\u00003\u00000\u00004\u00000\u00001\u00002\u00007\u00009\u00000\u00001",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "是否在孕育新生 ? 什么在盘面中率先抵抗呢 ? 你有没复盘到这占三线红呢 ? 众筹 + v 13040127901",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 65,
   "ocr_chars": 48,
+  "embedded_cjk_ratio": 0.462,
+  "ocr_cjk_ratio": 0.667,
   "ocr_error": "",
   "ocr_tiles": 1
 }

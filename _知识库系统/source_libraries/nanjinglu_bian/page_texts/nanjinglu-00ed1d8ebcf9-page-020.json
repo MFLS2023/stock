@@ -2,11 +2,15 @@
   "source_hash": "00ed1d8ebcf9fb13b6082ddd5a89b5ac6eedca9bc32aee7d24214d7804ac6649",
   "dpi": 140,
   "page": 20,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "精选留言\n暂无...",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "精选留言暂无 “",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 9,
   "ocr_chars": 7,
+  "embedded_cjk_ratio": 0.667,
+  "ocr_cjk_ratio": 0.857,
   "ocr_error": "",
   "ocr_tiles": 1
 }

@@ -2,11 +2,15 @@
   "source_hash": "bef86704bc0ad30c021af2421bac9ac10ee14654025f487116a0b096ba0e7461",
   "dpi": 140,
   "page": 4,
-  "method": "embedded_fallback",
-  "confidence": "low",
-  "text": "佘蔓昀律师 🌅 广东5月19日\n首评\n彼岸总判断资金走势一流",
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "佘昀律师 = 广东 5 月 19 日彼岸总判断资金走势一流首评",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 26,
   "ocr_chars": 25,
+  "embedded_cjk_ratio": 0.846,
+  "ocr_cjk_ratio": 0.84,
   "ocr_error": "",
   "ocr_tiles": 1
 }

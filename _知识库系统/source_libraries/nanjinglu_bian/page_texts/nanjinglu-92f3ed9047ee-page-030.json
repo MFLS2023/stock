@@ -5,8 +5,12 @@
   "method": "ocr",
   "confidence": "medium",
   "text": "RPS 领先就更佳了 , 选对股再谈买点。 海峡创新、 超捷股份这些周期内的 R PS 领先股都是提前于板块具他个股进入三线红的 , 他们的趋势内力更强 , 买在突破回头看都是最好的选择。 ( 三 ) 板块三线红其实除了个股排序 RPS 以外 , 板块的 RPS 也是存在排序的 , 用以辅助我们观察主流板块的存在 , 辅助我们更深刻理解主线存在。 板块 RPS 设置 : 名粽 RPSBKE*ÉI 「 . 公式庙述块三线且接近一一年新高数 1 . 4 《 5 一数 9 一 12 《数 13 一 16 2 3 : 公式类型且地类型复列版本 ] 0 二 〔 ] 「 用于吒 @ 云公使所据公式标筌 —EXTDATA_lJSER(7 , 的 . { 氐的 PS , B K5 : RPSBK5.—BK5/ —IF(RPSBK5 〈 。9U是, 1 , RP B . 于 85 BKBI : BKIU:—EXTDQTA USER ( 8 1 RPSBK1g : 以B鯊1U/ —IF(RPSBKIO<—90 , 1 ) . 〈 S 1 弋 8 , 私 30401279 旧 BK15:—EXTDATA USER(9 的 1 RPSBK15 “ 以 B 15 / —IF(RPSBK15C—9D , 1 ) . { RPSB 1 大、 . 85 , . —EXTDQTA USER ( 1 , , ) 20 氵的 RPS } B 2 0 : RPS 田 《 ? : B 2 —IF(RPSRK2D<—9D , 1 ) . { RPSBK2 , 大到二 85 , nKßO: BKAAI:—CLOSE/HHU(HIGH 250) 〉 0 . 85 8K5 过值 , 引用 7 号 《 D 的序列据 RPSBK5 的生 . 8K5 / 10 EK010 值 : 处榘 RPSEK5 《 = 虬 , 过巨 0 吉则回 1 EKI 《值 : 引用 8 号地的字列数据 R EK100 《百 8K10 / 10 板块选股公式 : BK5:=EXTDATA USER(7,0);{5 天的 RPS} RPSBK5:=BK5/10; BK01:=lF(RPSBK5<=90,0,1);{RPSBK5 大于 85}; BKI O:=EXTDATA USER(8,0);{10 天的 RPS} RPSBKIO:=BKIO/IO; 另存为涩果",
+  "ocr_residue": "",
+  "ocr_residue_chars": 0,
   "embedded_chars": 338,
   "ocr_chars": 781,
+  "embedded_cjk_ratio": 0.42,
+  "ocr_cjk_ratio": 0.311,
   "ocr_error": "",
   "ocr_tiles": 1
 }
