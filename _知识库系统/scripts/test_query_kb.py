@@ -14,13 +14,18 @@ index and reports on data the run is about to replace:
 
     ... discover ... -k FixtureShapeTests -k IndexPollutionTests \
                      -k ShortTermSearchTests -k SourceCoverageTests \
-                     -k RetrievalContractTests -k SubsetMarkerTests \
+                     -k RetrievalContractTests -k GlobEscapingTests \
+                     -k AsciiCaseRecallTests -k SubsetMarkerTests \
                      -k SourceRegistryTests
     ... discover ... -k RealIndexRequirementTests -k RealIndexTests \
                      -k RegistryScopedIndexTests                 # after rebuild
 
 ``test_the_subset_markers_cover_every_test_class`` keeps those two lists exhaustive:
-add a class without listing it and that test fails.
+add a class without listing it and that test fails. And
+``test_the_documented_commands_list_every_subset_class`` keeps *these* command lines in
+sync with the lists — the earlier revision only guarded the code constants, so both this
+docstring and SPEC 3.2 silently dropped ``-k GlobEscapingTests`` and the documented
+fixture command ran 54 cases where 64 were intended.
 
 Two source scopes, deliberately kept apart — see REGRESSION_SAMPLE and source_registry().
 Frozen row counts and hit counts are asserted against the sample; everything phrased as
@@ -55,17 +60,19 @@ current code does not deliver. Three rules, per SPEC 3.0:
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import re
 import sqlite3
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from build_index import add_chunk, create_schema
-from query_kb import glob_literal, glob_pattern, search
+from query_kb import glob_fold_ascii_case, glob_literal, glob_pattern, search
 
 
 # infer_topics() labels every chunk with 5-6 topics drawn from taxonomy.yaml. The
@@ -93,8 +100,9 @@ def without_term(seed: int) -> str:
 
 # A second two-character term, present in tulip_garden's prose and nowhere else. Lets a
 # multi-short-term query be checked for OR semantics: on the real corpus 情绪 sits at
-# 888 prose matches spread 369/150/369, so a query pairing it with another short term
+# 889 prose matches spread 369/151/369, so a query pairing it with another short term
 # must not come back holding only one source's chunks.
+# （清洁前是 888、分布 369/150/369，那组是历史值。）
 SECOND_TERM = "情绪"
 
 
@@ -139,10 +147,13 @@ def chunk(
 
 
 # Chunks whose TITLE carries the two-character term while the prose does not. On the real
-# corpus this is a large share of legitimate results — 310 chunks for 龙头, 406 for 情绪,
+# corpus this is a large share of legitimate results — 310 chunks for 龙头, 405 for 情绪,
 # 58 for 竞价 — because titles are human-written, unlike the topics column. SPEC 2.2
 # therefore recalls text/title/author, and these fixture rows are what proves a
 # text-only implementation would drop them.
+#
+# 情绪 是 405 而不是 406：数据清洁（clean_text 删 NUL）之后有一块的正文不再被 NUL 截断，
+# 它从"仅标题含词"变成"正文也含词"。406 是清洁前的**历史值**。
 TITLE_WITH_TERM = "竞价专题整理"
 AUTHOR_WITH_TERM = "竞价老师"
 
@@ -243,6 +254,104 @@ def build_glob_fixture() -> sqlite3.Connection:
     connection.execute("INSERT INTO metadata VALUES (?,?)", ("fts_tokenizer", tokenizer))
     connection.commit()
     return connection
+
+
+# 两字 ASCII 词的大小写。短词走 GLOB，而 GLOB 是大小写敏感的——这是它与 MATCH、LIKE
+# 唯一不一致的地方。修复前真库实测（2026-08-02）：AI 召回 144、ai 83、Ai 3，而三列不区分
+# 大小写并集是 218，三个查询各自丢 74/135/215 条；而三字以上走 MATCH 的 AI硬件/ai硬件
+# 同为 8 块，旧 LIKE 兜底路径也不区分大小写。所以这是短词路径独有的回归。
+#
+# fixture 里正文、标题、作者三处各放不同的书写形式，任一处漏折叠都会在等值断言上露出来。
+CASE_TERM = "AI"
+CASE_FORMS = ("AI", "ai", "Ai", "aI")
+
+# 大小写块用独立的 source_id，好把它们与主 fixture 那批钉死的绝对数字隔开。
+CASE_SOURCE = "case_fixture"
+
+
+def build_case_fixture() -> sqlite3.Connection:
+    """一个专门装 ASCII 大小写形式的小库，与 build_fixture() 分开。
+
+    分开的理由同 build_glob_fixture()：主 fixture 里有一批钉死的绝对数字（标题命中
+    465、165/310/475、两词并集 195），多塞几块就全要跟着改，而那些数字守的是别的性质。
+
+    四种书写形式（AI / ai / Ai / aI）分布在正文、标题、作者三列上，每列至少两种，
+    这样"只折叠了 text 列"或"只处理了全大写形式"的实现都会在等值断言上失败。
+    另外放两块完全不含该词的，让"召回 == 并集"两边都不等于全表——否则一个直接返回
+    全库的实现也能通过。
+    """
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    tokenizer = create_schema(connection)
+    # 正文里四种形式各一块。
+    for index, form in enumerate(CASE_FORMS, start=1):
+        add_chunk(
+            connection,
+            chunk(
+                CASE_SOURCE,
+                index,
+                f"第{index}节讨论 {form} 硬件方向的持续性，属于正文含词。",
+                topics="盘口",
+            ),
+        )
+    # 标题含词、正文不含：两种形式，验证 title 列同样折叠。
+    for index, form in enumerate(("AI", "ai"), start=10):
+        add_chunk(
+            connection,
+            chunk(
+                CASE_SOURCE,
+                index,
+                f"第{index}节正文只讲大盘节奏，不含那个英文词。",
+                title=f"{form}方向专题",
+                topics="盘口",
+            ),
+        )
+    # 作者含词、正文和标题都不含：两种形式，验证 author 列同样折叠。
+    for index, form in enumerate(("Ai", "aI"), start=20):
+        add_chunk(
+            connection,
+            chunk(
+                CASE_SOURCE,
+                index,
+                f"第{index}节正文只讲仓位管理，不含那个英文词。",
+                title="仓位专题",
+                author=f"{form}研究员",
+                topics="盘口",
+            ),
+        )
+    # 混合大小写的三字以上词，用来对照 MATCH 分支的大小写行为。
+    for index, form in enumerate(("AI硬件", "ai硬件"), start=30):
+        add_chunk(
+            connection,
+            chunk(CASE_SOURCE, index, f"第{index}节复盘 {form} 的分歧转一致。", topics="盘口"),
+        )
+    # 不含该词的对照块，防止"返回全表"也能通过等值断言。
+    for index in range(40, 42):
+        add_chunk(
+            connection,
+            chunk(CASE_SOURCE, index, f"第{index}节是完全普通的复盘记录。", topics="盘口"),
+        )
+    connection.execute("INSERT INTO metadata VALUES (?,?)", ("fts_tokenizer", tokenizer))
+    connection.commit()
+    return connection
+
+
+def case_insensitive_ids(connection: sqlite3.Connection, term: str) -> set[str]:
+    """不区分大小写的 text/title/author 并集，topics 排除在外。
+
+    这是大小写断言的分母。用 SQLite 的 ``lower()`` + ``instr()`` 而不是 Python 侧
+    折叠：口径必须由数据库定义，因为召回也在数据库里算。``lower()`` 只折 ASCII
+    （``lower('Ａ')`` 仍是全角 Ａ），而 ``instr`` 是纯子串查找、没有元字符概念——
+    正是 GLOB 转义 + ASCII 字符类折叠之后应该等价的语义。
+    """
+    return {
+        row[0]
+        for row in connection.execute(
+            "SELECT chunk_id FROM chunks WHERE instr(lower(text), lower(?)) > 0 "
+            "OR instr(lower(title), lower(?)) > 0 OR instr(lower(author), lower(?)) > 0",
+            [term] * 3,
+        )
+    }
 
 
 def literal_substring_ids(connection: sqlite3.Connection, term: str) -> set[str]:
@@ -397,7 +506,7 @@ class FixtureShapeTests(unittest.TestCase):
 
     def test_title_and_author_only_matches_exist(self):
         # 15 chunks reachable only through title (10) or author (5). Mirrors the real
-        # corpus, where 龙头 has 310 title-only chunks and 情绪 406.
+        # corpus, where 龙头 has 310 title-only chunks and 情绪 405 (406 是数据清洁前的历史值)。
         title_only = self.connection.execute(
             "SELECT count(*) FROM chunks WHERE title LIKE '%竞价%' AND text NOT LIKE '%竞价%'"
         ).fetchone()[0]
@@ -431,10 +540,14 @@ class FixtureShapeTests(unittest.TestCase):
 class IndexPollutionTests(unittest.TestCase):
     """SPEC 缺陷 A（阶段 1 已修）：自动生成的 topics 列曾进入全文索引。
 
-    修复前实测（回归样本 3176 块，2026-08-02）：
+    修复前实测（回归样本 3176 块，2026-08-02，**均为历史值**）：
         情绪周期    FTS 1823, 正文 202  -> 89% 噪声
         龙头与核心  FTS 1358, 正文 0    -> 100% 噪声
         竞价与盘口  FTS 1525, 正文 0    -> 100% 噪声
+
+    正文 202 是清洁前的数，当前是 203（clean_text 删 NUL 后多了一块可见）。这里保留
+    旧值是因为它与 FTS 1823 属于同一次测量，是缺陷成因的存档；当前基线看
+    test_prose_match_baselines_hold。
 
     阶段 1 把 topics 从 ``chunks_fts`` 的列定义里移出（build_index.py:create_schema），
     修复后同样三个词的样本命中数为 516 / 0 / 0，精确等于 text/title/author 三字段并集。
@@ -490,8 +603,9 @@ class IndexPollutionTests(unittest.TestCase):
 
     def test_hits_converge_on_the_recall_target(self):
         # 收敛口径是 text/title/author 三字段并集，不是正文单列。正文口径与本节末句
-        # "title 保留"直接冲突：真库里 情绪周期 有 314 块只在标题含词，要求收敛到正文
-        # 202 就等于要求把标题列也移出 FTS。实测去掉 topics 后，样本命中 516 = 并集 516。
+        # "title 保留"直接冲突：真库里 情绪周期 有 313 块只在标题含词，要求收敛到正文
+        # 203 就等于要求把标题列也移出 FTS。实测去掉 topics 后，样本命中 516 = 并集 516。
+        # （清洁前是 314 / 202，那组是历史值；并集 516 两次都一样，只是归属换了一栏。）
         #
         # fixture 里标签词的三字段并集为 0（标签文本不出现在任何人写字段里），所以这里
         # 同时验证了标签命中归零；TITLE_WITH_TERM 反向验证标题独有命中仍被算进来。
@@ -512,7 +626,7 @@ class IndexPollutionTests(unittest.TestCase):
     def test_title_column_stays_searchable(self):
         # Titles are human-written text, unlike topics, so they keep their index. On the
         # frozen sources, title-only matches are a large share of legitimate results:
-        # 310 chunks for 龙头, 406 for 情绪, 58 for 竞价. Dropping the column would lose them.
+        # 310 chunks for 龙头, 405 for 情绪, 58 for 竞价. Dropping the column would lose them.
         # 465 = 475 total minus the 10 chunks retitled to TITLE_WITH_TERM.
         self.assertEqual(fts_hits(self.connection, "示例文档", column="title"), 465)
         self.assertEqual(fts_hits(self.connection, TITLE_WITH_TERM, column="title"), 10)
@@ -522,8 +636,9 @@ class ShortTermSearchTests(unittest.TestCase):
     """SPEC 缺陷 B（阶段 2 已修）：短于三字的检索词曾被整个丢弃。
 
     Measured on the real database (2026-08-02): 竞价 394 prose matches / 0 FTS hits,
-    筹码 367/0, 龙头 615/0, 打板 186/0, 情绪 888/0. Most trading vocabulary is
+    筹码 367/0, 龙头 616/0, 打板 186/0, 情绪 889/0. Most trading vocabulary is
     two characters, so this is the highest-traffic entry point into the corpus.
+    （龙头 615、情绪 888 是数据清洁前的历史值。FTS 侧的 0 与清洁无关，永远是 0。）
 
     MATCH 命中仍然是 0，而且永远是 0：trigram 建不出两字 gram，阶段 2 也没换
     tokenizer。变的是 query_kb.py 不再按长度丢词——两字词改在 chunks_fts 的
@@ -574,7 +689,7 @@ class ShortTermSearchTests(unittest.TestCase):
     def test_title_and_author_only_matches_are_recalled(self):
         # 阶段 2 摘除 expectedFailure。这 15 条只在标题或作者里含词，正文不含，
         # 所以只对 text 做 GLOB 的实现会全部丢掉——契约要求三列各自 GLOB 再取并集。
-        # 真库同类块：龙头 310 条、情绪 406 条、竞价 58 条，全部来自 title。
+        # 真库同类块：龙头 310 条、情绪 405 条、竞价 58 条，全部来自 title。
         # 这 15 条的数量由 test_recall_target_is_larger_than_prose_alone 那个测试守着。
         rows = search(self.connection, "竞价", None, None, 500)
         got = {row["chunk_id"] for row in rows}
@@ -1019,6 +1134,213 @@ class GlobEscapingTests(unittest.TestCase):
                 self.assertIsInstance(search(self.connection, term, None, None, 5), list)
 
 
+class AsciiCaseRecallTests(unittest.TestCase):
+    """短词的 ASCII 大小写折叠。GLOB 大小写敏感，MATCH 和 LIKE 都不敏感。
+
+    修复前实测（真库 2026-08-02）：``AI`` 召回 144 块、``ai`` 83 块、``Ai`` 3 块、
+    ``aI`` 0 块，而 text/title/author 三列不区分大小写的并集是 218 块——四个查询分别
+    丢 74/135/215/218 条。同一个词换个大小写就换一批结果，而用户看不出差别。
+
+    这是短词路径**独有**的回归，不是全局行为：三字以上走 MATCH，``AI硬件`` 与
+    ``ai硬件`` 实测同为 8 块；被删掉的 LIKE 兜底路径也不区分大小写。所以阶段 2 把短词
+    改走 GLOB 时，恰好在这一条上比旧实现更弱了。
+
+    修法是在 glob_pattern() 里把 ASCII 字母折成 ``[Aa]`` 字符类。折叠范围严格限定
+    ASCII，与 SQLite 的 ``lower()`` 口径对齐——用 Python 的 ``isalpha()`` 会把全角
+    字母和希腊字母一起折进去，召回比基准多出一批，等值断言反而失败。
+
+    断言挂在 search() 的返回上，不挂在 GLOB 模式的字符串形态上（那种断言只有一条，
+    见 test_pattern_folds_ascii_letters_into_character_classes），所以换成 LIKE 路径
+    或换 tokenizer，验收标准都不变。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.connection = build_case_fixture()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.connection.close()
+
+    def recall(self, term: str) -> set[str]:
+        return {
+            row["chunk_id"] for row in search(self.connection, term, None, None, 5000)
+        }
+
+    def test_the_fixture_really_holds_every_case_form(self):
+        # 防空转。下面每条断言都是"召回 == 不区分大小写并集"，如果 fixture 里某种形式
+        # 根本不存在，那一侧就是空集，等值断言会假通过。
+        for form in CASE_FORMS:
+            with self.subTest(form=form):
+                count = self.connection.execute(
+                    "SELECT count(*) FROM chunks WHERE instr(text, ?) > 0 "
+                    "OR instr(title, ?) > 0 OR instr(author, ?) > 0",
+                    [form] * 3,
+                ).fetchone()[0]
+                self.assertGreater(count, 0, f"fixture 里没有含 {form!r} 的块")
+
+    def test_the_fixture_spreads_case_forms_across_all_three_columns(self):
+        # 三列各自都要有大小写变体。只折叠 text 列的实现要靠 title/author 上的变体
+        # 才能暴露，所以这里把 fixture 的这个形状钉住。
+        for column in ("text", "title", "author"):
+            with self.subTest(column=column):
+                forms = {
+                    row[0]
+                    for row in self.connection.execute(
+                        f"SELECT DISTINCT substr({column}, instr(lower({column}), 'ai'), 2) "
+                        f"FROM chunks WHERE instr(lower({column}), 'ai') > 0"
+                    )
+                }
+                self.assertGreaterEqual(
+                    len(forms), 2, f"{column} 列只有 {forms} 一种写法，折叠断言在这列上空转"
+                )
+
+    def test_the_fixture_is_not_entirely_made_of_matches(self):
+        # 另一头的防空转：必须有块不含该词，否则"召回 == 并集"在一个直接返回全表的
+        # 实现下也成立。
+        total = self.connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
+        self.assertLess(len(case_insensitive_ids(self.connection, CASE_TERM)), total)
+
+    def test_every_case_form_recalls_the_same_chunk_ids(self):
+        # 核心断言之一：AI / ai / Ai / aI 必须返回**同一个** chunk_id 集合。
+        # 修复前四者分别是 144/83/3/0 块（真库口径），互不相等。
+        recalls = {form: self.recall(form) for form in CASE_FORMS}
+        first = recalls[CASE_FORMS[0]]
+        self.assertTrue(first, "fixture 里该词一条都召不回，断言会空转")
+        for form, got in recalls.items():
+            with self.subTest(form=form):
+                self.assertEqual(got, first, f"{form!r} 的召回集合与 {CASE_FORMS[0]!r} 不同")
+
+    def test_case_folded_recall_equals_the_case_insensitive_union(self):
+        # 核心断言之二：集合必须**等于** text/title/author 的不区分大小写并集。
+        # 只做"四者相等"不够——四个都返回空集也相等。等值同时卡住两头：少一条是折叠
+        # 没覆盖到某列或某种形式，多一条是把 topics 也放进了召回。
+        expected = case_insensitive_ids(self.connection, CASE_TERM)
+        self.assertTrue(expected)
+        for form in CASE_FORMS:
+            with self.subTest(form=form):
+                self.assertEqual(self.recall(form), expected)
+
+    def test_case_folding_does_not_recall_topics_only_chunks(self):
+        # 折叠不得顺带把 topics 拉回召回（阶段 1 已把它移出 FTS 可匹配列）。
+        # 这个 fixture 的 topics 一律是"盘口"，不含 ai，所以这里换个词构造：
+        # 给一块打上含词的 topics，正文标题作者都不含，它必须召不到。
+        connection = build_case_fixture()
+        try:
+            add_chunk(
+                connection,
+                chunk(
+                    CASE_SOURCE,
+                    90,
+                    "第90节正文完全不含那个英文词。",
+                    title="纯净标题",
+                    author="纯净作者",
+                    topics="AI与算力",
+                ),
+            )
+            connection.commit()
+            label_only = f"{CASE_SOURCE}-0090"
+            self.assertEqual(
+                connection.execute(
+                    "SELECT count(*) FROM chunks WHERE chunk_id = ? "
+                    "AND instr(lower(topics), 'ai') > 0 AND instr(lower(text), 'ai') = 0 "
+                    "AND instr(lower(title), 'ai') = 0 AND instr(lower(author), 'ai') = 0"
+                    , (label_only,)
+                ).fetchone()[0],
+                1,
+                "这一块必须只在 topics 含词，否则测不出污染",
+            )
+            for form in CASE_FORMS:
+                with self.subTest(form=form):
+                    got = {
+                        row["chunk_id"]
+                        for row in search(connection, form, None, None, 5000)
+                    }
+                    self.assertNotIn(label_only, got)
+                    self.assertEqual(got, case_insensitive_ids(connection, CASE_TERM))
+        finally:
+            connection.close()
+
+    def test_long_terms_keep_their_case_insensitive_match_behaviour(self):
+        # 对照组：三字以上走 MATCH，本来就不区分大小写。这条守住"修短词没把长词
+        # 改坏"，也说明为什么短词以前的行为是回归而不是设计。
+        self.assertEqual(self.recall("AI硬件"), self.recall("ai硬件"))
+        self.assertEqual(self.recall("AI硬件"), case_insensitive_ids(self.connection, "AI硬件"))
+
+    def test_mixed_length_query_folds_the_short_term_too(self):
+        # 混合长短词时短词仍要折叠。OR 语义下长词的命中会掩盖短词的贡献，所以断言
+        # 写成"两种大小写的混合查询结果相同"，而不是只看总数不为空。
+        self.assertEqual(self.recall("AI 弱转强"), self.recall("ai 弱转强"))
+        self.assertEqual(
+            self.recall("ai 弱转强"),
+            case_insensitive_ids(self.connection, CASE_TERM)
+            | recall_target_ids(self.connection, "弱转强"),
+        )
+
+    def test_case_folding_preserves_metacharacter_literals(self):
+        # 折叠与转义的顺序：先转义再折叠。反过来的话 glob_literal 会把折叠产生的
+        # `[Aa]` 改成 `[[]Aa]`，模式全错。`A?` 是这两件事同时发生的最小例子。
+        self.assertEqual(glob_pattern("A?"), "*[Aa][?]*")
+        self.assertEqual(glob_pattern("a*b"), "*[Aa][*][Bb]*")
+        self.assertEqual(glob_pattern("["), "*[[]*")
+
+    def test_pattern_folds_ascii_letters_into_character_classes(self):
+        # 唯一一条挂在模式形态上的断言，因为字符类的**写法**本身有个容易错的点：
+        # `]` 出现在字母后面时（`a]` → `[Aa]]`）不能再包一层，那样会让类不闭合。
+        cases = {
+            "AI": "*[Aa][Ii]*",
+            "ai": "*[Aa][Ii]*",
+            "A股": "*[Aa]股*",
+            "5G": "*5[Gg]*",
+            "a]": "*[Aa]]*",
+            "竞价": "*竞价*",       # 中日韩字符不折叠
+            "Ａ": "*Ａ*",           # 全角字母不折叠：SQLite 的 lower() 也不折它
+            "Α": "*Α*",            # 希腊字母同理
+        }
+        for raw, expected in cases.items():
+            with self.subTest(term=raw):
+                self.assertEqual(glob_pattern(raw), expected)
+
+    def test_non_ascii_case_is_left_alone_on_purpose(self):
+        # 折叠范围的边界，写成断言而不是只写在注释里。验收口径是"等于 SQLite
+        # lower() 定义的并集"，而 lower() 只折 ASCII。把全角字母也折进去会让召回
+        # 超出基准——那是"更强"而不是"一致"，本轮不做。
+        self.assertEqual(glob_fold_ascii_case("Ａ"), "Ａ")
+        self.assertEqual(glob_fold_ascii_case("Α"), "Α")
+        self.assertEqual(glob_fold_ascii_case("ß"), "ß")
+        self.assertEqual(
+            self.connection.execute("SELECT lower('ＡΑß')").fetchone()[0], "ＡΑß"
+        )
+
+    def test_source_and_author_filters_still_apply_to_folded_queries(self):
+        # 过滤器不能因为折叠而失效。--author 走的是 LIKE（本来不区分大小写），
+        # 这里两种大小写都查一遍，确认过滤后的集合仍然一致。
+        for form in CASE_FORMS:
+            with self.subTest(form=form):
+                scoped = search(self.connection, form, CASE_SOURCE, None, 5000)
+                self.assertTrue(scoped)
+                self.assertEqual({row["source_id"] for row in scoped}, {CASE_SOURCE})
+                self.assertEqual(
+                    len(search(self.connection, form, "不存在的来源", None, 5000)), 0
+                )
+        by_author = {
+            row["chunk_id"] for row in search(self.connection, "AI", None, "研究员", 5000)
+        }
+        self.assertTrue(by_author)
+        self.assertEqual(
+            by_author,
+            {row["chunk_id"] for row in search(self.connection, "ai", None, "研究员", 5000)},
+        )
+
+    def test_recalled_chunk_ids_stay_unique_after_folding(self):
+        # 一块可能同时被多种形式、多列命中（正文 AI + 标题 ai），去重必须仍然成立。
+        for form in CASE_FORMS:
+            with self.subTest(form=form):
+                rows = search(self.connection, form, None, None, 5000)
+                ids = [row["chunk_id"] for row in rows]
+                self.assertEqual(len(ids), len(set(ids)))
+
+
 DATABASE = Path(__file__).resolve().parents[2] / "_知识库系统" / "indexes" / "knowledge.db"
 SOURCES_CONFIG = Path(__file__).resolve().parents[2] / "_知识库系统" / "config" / "sources.yaml"
 
@@ -1168,7 +1490,7 @@ class RealIndexTests(unittest.TestCase):
         """The SPEC 2.2 recall target: text/title/author union, topics excluded.
 
         Asserting against prose alone would demand that the fix DROP legitimate results:
-        measured on the frozen sources, 龙头 has 310 chunks and 情绪 406 whose title
+        measured on the frozen sources, 龙头 has 310 chunks and 情绪 405 whose title
         carries the term while the prose does not. Those titles are human-written, unlike
         the auto-generated topics column, and stage 1 keeps them in the FTS index.
         """
@@ -1348,7 +1670,7 @@ class RealIndexTests(unittest.TestCase):
         # （rank 恒为 999.0），而兜底带着候选池截断和来源偏斜（缺陷 B + C）。
         # 修复后：召回等于 text/title/author 三字段并集，且不是兜底给的。
         #
-        # 口径是并集而不是正文：真库里 龙头 有 310 块、情绪 有 406 块只在标题里含词，
+        # 口径是并集而不是正文：真库里 龙头 有 310 块、情绪 有 405 块只在标题里含词，
         # 那是人写的真实标题，属于合法结果。用正文口径会要求实现把它们丢掉。
         # 等值断言同时卡住上界（不得把 topics 放进召回）。
         # 断言挂在 search() 的返回上，不挂在 MATCH 上——修法可以是 GLOB、可以是
@@ -1387,8 +1709,8 @@ class RealIndexTests(unittest.TestCase):
                 self.assertTrue(all(row["rank"] != 999.0 for row in rows))
 
     def test_topic_labels_do_not_dominate_full_text_search(self):
-        # 阶段 1 前：情绪周期 FTS 1823 / 正文 202，龙头与核心 1358 / 正文 0，
-        # 竞价与盘口 1525 / 正文 0。阶段 1 后实测 516 / 0 / 0。
+        # 阶段 1 前：情绪周期 FTS 1823 / 正文 202（**清洁前的历史值**，当前正文是 203），
+        # 龙头与核心 1358 / 正文 0，竞价与盘口 1525 / 正文 0。阶段 1 后实测 516 / 0 / 0。
         # 数字取回归样本范围内——全库口径下 情绪周期 修复前是 1850，多算了样本外来源的 27 条。
         for term in ("情绪周期", "龙头与核心", "竞价与盘口"):
             with self.subTest(term=term):
@@ -1398,9 +1720,10 @@ class RealIndexTests(unittest.TestCase):
 
     def test_phase_one_acceptance_hit_counts(self):
         # SPEC 3.1 阶段 1 验收表，逐项钉死在真库上。收敛口径是三字段并集而不是正文单列：
-        # 同节末句要求 title/author 保留在 FTS 中，而 情绪周期 有 314 块只在标题含词，
-        # 两条不能同时成立。阶段 2 的表格（正文 202 + 标题作者独有 314 = 并集 516）和本
+        # 同节末句要求 title/author 保留在 FTS 中，而 情绪周期 有 313 块只在标题含词，
+        # 两条不能同时成立。阶段 2 的表格（正文 203 + 标题作者独有 313 = 并集 516）和本
         # 阶段对应的旧 expectedFailure（断言"不超过并集"）都指向并集口径。
+        # （清洁前是 202 + 314，那组是历史值；并集 516 前后一致，只是归属换了一栏。）
         #
         # 断言写成"等于并集"而不是写死 516：并集本身由 test_prose_match_baselines_hold
         # 和 test_recall_target_exceeds_prose_for_high_traffic_terms 钉住，这里要证明的是
@@ -1540,6 +1863,61 @@ class RealIndexTests(unittest.TestCase):
                 self.assertEqual(got, expected)
                 self.assertLess(len(got), total, f"{term!r} 返回了全表，通配符仍在生效")
 
+    def test_ascii_case_forms_recall_the_same_chunks_on_the_real_corpus(self):
+        # fixture 侧的 AsciiCaseRecallTests 用 12 块的小库证明语义，这里在真库上复核——
+        # 修复前的数字全部是在这个 48M 的库上测出来的：AI 召回 144、ai 83、Ai 3、aI 0，
+        # 而 text/title/author 三列不区分大小写的并集是 218，四者分别丢 74/135/215/218 条。
+        #
+        # 口径用 lower() + instr：折叠范围限定 ASCII，而 SQLite 的 lower() 恰好只折
+        # ASCII，两边定义一致。用 Python 侧折叠当基准会把全角字母也算进去，基准本身
+        # 就比实现"更宽"，等值断言测的就不是同一件事了。
+        expected = {
+            row[0]
+            for row in self.connection.execute(
+                "SELECT chunk_id FROM chunks WHERE instr(lower(text), 'ai') > 0 "
+                "OR instr(lower(title), 'ai') > 0 OR instr(lower(author), 'ai') > 0"
+            )
+        }
+        self.assertTrue(expected, "真库里没有含 ai 的块，这条断言会空转")
+        recalls = {}
+        for form in ("AI", "ai", "Ai", "aI"):
+            with self.subTest(form=form):
+                got = {
+                    row["chunk_id"] for row in search(self.connection, form, None, None, 100000)
+                }
+                recalls[form] = got
+                self.assertEqual(got, expected)
+        self.assertEqual(len({frozenset(ids) for ids in recalls.values()}), 1)
+
+    def test_case_folding_does_not_pull_topics_into_recall_on_the_real_corpus(self):
+        # 折叠不得顺带把 topics 拉回召回。真库里 topics 是 infer_topics() 自动打的标签，
+        # 阶段 1 已把它移出 FTS 可匹配列；这里按结果反查：仅 topics 含词的块必须一条
+        # 都不在召回里。实测这个差集当前为 0 块（taxonomy 里没有含 ai 的标签），所以
+        # 断言写成"召回与 topics-only 集合不相交"而不是"差集非空"——后者会因内容变化
+        # 误报，而不相交在任何内容下都必须成立。
+        topics_only = {
+            row[0]
+            for row in self.connection.execute(
+                "SELECT chunk_id FROM chunks WHERE instr(lower(topics), 'ai') > 0 "
+                "AND instr(lower(text), 'ai') = 0 AND instr(lower(title), 'ai') = 0 "
+                "AND instr(lower(author), 'ai') = 0"
+            )
+        }
+        for form in ("AI", "ai"):
+            with self.subTest(form=form):
+                got = {
+                    row["chunk_id"] for row in search(self.connection, form, None, None, 100000)
+                }
+                self.assertFalse(got & topics_only)
+
+    def test_long_terms_stay_case_insensitive_on_the_real_corpus(self):
+        # 对照组，说明短词以前的行为是回归而不是设计：三字以上走 MATCH，本来就不区分
+        # 大小写。实测 AI硬件 与 ai硬件 同为 8 块，修复前后都是。
+        self.assertEqual(
+            {row["chunk_id"] for row in search(self.connection, "AI硬件", None, None, 100000)},
+            {row["chunk_id"] for row in search(self.connection, "ai硬件", None, None, 100000)},
+        )
+
     def test_the_real_index_carries_no_nul_bytes(self):
         """NUL 硬断言：一个 NUL 会让它后面的正文对 GLOB 和 LIKE 永久不可见。
 
@@ -1589,6 +1967,39 @@ class RealIndexTests(unittest.TestCase):
 CJK_RUN = re.compile(r"[一-鿿]+")
 SMOKE_MIN_HITS = 3
 SMOKE_SAMPLE_CHUNKS = 40
+
+# 会进索引的结构化产物。build_index.py 读的就是这几个文件，所以 NUL 检查的范围以它们
+# 为准，而不是"source_libraries 下所有 JSON"。methods/conflicts 只有部分来源有，按存在
+# 与否跳过，不要求每个来源都齐。
+#
+# 刻意不含 page_texts/*.json（PDF 文本层与 OCR 的原始提取缓存）和 image_ocr_cache：
+# 那些是导入器的输入，读出来之后还要过 clean_text() 才落进产物。也不含 messages.jsonl
+# ——它是 panfeng 的中间产物（导入器自己的解析记录），chunks/parents 才是索引读的。
+INDEXABLE_JSONL = (
+    "documents.jsonl",
+    "parents.jsonl",
+    "chunks.jsonl",
+    "methods.jsonl",
+    "conflicts.jsonl",
+)
+
+
+def json_string_values(value):
+    """递归产出一个 JSON 值里所有的字符串（含 dict 的键）。
+
+    必须递归：NUL 可能藏在嵌套结构里（``merged_locators`` 是列表、``provenance`` 是
+    嵌套 dict），只看顶层字段会漏。键也要看——键名理论上也能带 NUL，代价是零。
+    """
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, nested in value.items():
+            if isinstance(key, str):
+                yield key
+            yield from json_string_values(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            yield from json_string_values(nested)
 
 
 def frequent_trigrams(texts, limit: int = 200) -> list[str]:
@@ -1907,6 +2318,127 @@ class RegistryScopedIndexTests(unittest.TestCase):
                 )
                 self.assertEqual(set(sources_of(rows)), set(expected))
 
+    def test_the_indexable_products_carry_no_nul_bytes(self):
+        """可索引产物的 NUL 硬断言，按文件查，不只按数据库查。
+
+        为什么不能只查数据库：数据库是**当前一次**构建的产物，而 JSONL 是构建的输入。
+        产物里混进 NUL 的话，重建索引会把它带进库，而此刻数据库是干净的——只查库的
+        断言在那个时间窗里通不报。这条按输入查，所以它在重建之前就会失败。
+
+        为什么必须解析 JSON 而不是扫原始字节：JSON 把 NUL 序列化成六个 ASCII 字符
+        ``\\u0000``，原始字节里根本没有 0x00。实测 page_texts 缓存就是这样——312 个
+        文件原始字节 NUL 计数为 0，解码后有 651 个（2026-08-02）。按字节 grep 会报
+        "全部干净"，那正是这条断言存在的理由。
+
+        **page_texts 明确排除在外**，因为它是 PDF 文本层/OCR 的原始提取缓存，不是
+        可索引产物：``import_nanjinglu.py`` 读缓存**之后**才过 ``clean_text()``
+        （见 clean_text 落点的说明），NUL 在那一步被删掉，所以缓存里留着转义后的 NUL
+        既无害也不需要重新 OCR。当前实测：page_texts 41 个文件、651 个 NUL，来自 4 个
+        文档（nanjinglu-554254de485c / 92154afd0e2c / 92f3ed9047ee / c0bf0cd2860c）。
+        这个豁免是按目录名精确排除的，不是按"某来源整体豁免"——同一个来源下的
+        chunks.jsonl 照查。
+
+        覆盖面从 source_libraries 的目录动态取，接入新来源自动纳入，不用改这里。
+        """
+        library = DATABASE.parents[1] / "source_libraries"
+        self.assertTrue(library.is_dir(), f"source_libraries 不存在：{library}")
+        sources = sorted(path for path in library.iterdir() if path.is_dir())
+        self.assertTrue(sources, "source_libraries 下一个来源目录都没有，断言会空转")
+
+        checked_files = 0
+        for source in sources:
+            # 1. texts/ 下的文本：纯文本文件，按解码后的字符查。
+            texts_dir = source / "texts"
+            if texts_dir.is_dir():
+                for path in sorted(texts_dir.rglob("*")):
+                    if not path.is_file():
+                        continue
+                    checked_files += 1
+                    with self.subTest(source=source.name, file=path.name):
+                        count = path.read_text(encoding="utf-8", errors="surrogateescape").count(
+                            "\x00"
+                        )
+                        self.assertEqual(count, 0, f"{path} 有 {count} 个 NUL")
+
+            # 2. 结构化产物：递归检查每个 JSON 字符串值。methods/conflicts 只有部分来源有。
+            for name in INDEXABLE_JSONL:
+                path = source / name
+                if not path.exists():
+                    continue
+                checked_files += 1
+                with self.subTest(source=source.name, file=name):
+                    offenders: list[str] = []
+                    for number, line in enumerate(
+                        path.read_text(encoding="utf-8").splitlines(), start=1
+                    ):
+                        if not line.strip():
+                            continue
+                        count = sum(
+                            value.count("\x00") for value in json_string_values(json.loads(line))
+                        )
+                        if count:
+                            offenders.append(f"第{number}行 {count} 个")
+                    self.assertEqual(offenders, [], f"{path} 含 NUL：{offenders[:5]}")
+
+        self.assertGreater(checked_files, 0, "一个文件都没查到，断言在空转")
+
+    def test_the_nul_check_actually_detects_an_escaped_nul(self):
+        """守住上一条的检测能力：造一个转义 NUL 的 JSONL，必须被抓出来。
+
+        不是多余的自测。上一条的关键在于"解析 JSON 之后再查"，而一个改成按原始字节
+        grep 的实现会在真库上照样通过（page_texts 就是活证据：原始字节 0、解码后 651）。
+        这条在临时目录里造一行 ``{"text": "a\\u0000b"}``，按字节查看不见、按 JSON 值查
+        看得见，两种口径都断言一次，所以退化成字节扫描会让这条失败。
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunks.jsonl"
+            path.write_text(json.dumps({"text": "a\x00b", "nested": {"t": ["c\x00"]}}) + "\n",
+                            encoding="utf-8")
+            raw = path.read_bytes()
+            self.assertEqual(raw.count(b"\x00"), 0, "JSON 应把 NUL 转义，原始字节里没有 0x00")
+            self.assertIn(b"\\u0000", raw)
+            decoded = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(sum(v.count("\x00") for v in json_string_values(decoded)), 2)
+
+    def test_the_page_texts_cache_is_excluded_on_purpose(self):
+        """豁免范围本身也要有断言，否则"排除了什么"只活在注释里。
+
+        两头都钉：page_texts 里当前**确实**还有转义 NUL（所以豁免不是空话，去掉豁免
+        上一条就会失败），而同一个来源的可索引 JSONL **必须**干净（所以豁免没有顺带
+        放过整个来源）。实测 2026-08-02：page_texts 651 个 NUL / 41 个文件 / 4 个文档，
+        nanjinglu_bian 的 chunks/parents/documents 三个 JSONL 为 0。
+
+        缓存里的 NUL 数量不写死：那是 OCR 输出的属性，重跑 OCR 会变。断言只要求
+        "仍然存在"，一旦将来清零，这条会失败并提示可以撤掉豁免——那时豁免才是死代码。
+        """
+        library = DATABASE.parents[1] / "source_libraries"
+        caches = sorted(library.glob("*/page_texts"))
+        if not caches:
+            self.skipTest("没有来源使用 page_texts 缓存，豁免无从验证")
+        total = 0
+        for cache in caches:
+            for path in sorted(cache.rglob("*.json")):
+                total += sum(
+                    value.count("\x00")
+                    for value in json_string_values(json.loads(path.read_text(encoding="utf-8")))
+                )
+            # 同一个来源的可索引产物必须干净：豁免只针对 page_texts 这个目录。
+            for name in INDEXABLE_JSONL:
+                path = cache.parent / name
+                if not path.exists():
+                    continue
+                with self.subTest(source=cache.parent.name, file=name):
+                    count = sum(
+                        value.count("\x00")
+                        for line in path.read_text(encoding="utf-8").splitlines()
+                        if line.strip()
+                        for value in json_string_values(json.loads(line))
+                    )
+                    self.assertEqual(count, 0)
+        self.assertGreater(
+            total, 0, "page_texts 已经没有 NUL 了，可以撤掉豁免并把它一起纳入检查"
+        )
+
 
 # The -k names SPEC 3.2 uses to split the suite. Kept next to the check that enforces
 # them so the two never drift apart.
@@ -1917,6 +2449,7 @@ FIXTURE_TEST_CLASSES = (
     "SourceCoverageTests",
     "RetrievalContractTests",
     "GlobEscapingTests",
+    "AsciiCaseRecallTests",
     "SubsetMarkerTests",
     "SourceRegistryTests",
 )
@@ -1970,6 +2503,47 @@ class SubsetMarkerTests(unittest.TestCase):
             for other in names:
                 if name != other and name in other:
                     self.fail(f"类名 {name} 是 {other} 的子串，-k {name} 会把两个都收进来")
+
+    def test_the_documented_commands_list_every_subset_class(self):
+        """两份 `-k` 清单必须与**文档里的命令行**一致，不只与代码常量一致。
+
+        这是本轮补上的守卫。原来只有 test_the_subset_markers_cover_every_test_class，
+        它比对的是 FIXTURE_TEST_CLASSES 和实际定义的类——两边都在代码里。于是
+        GlobEscapingTests 加进了常量、却没加进本模块 docstring 和 SPEC 3.2 的命令行，
+        照文档实跑只有 54 项而不是 64 项，而三条守卫全部通过。
+
+        做法是从文本里抽出所有 ``-k <名字>``，与常量做集合比较。不引入测试运行器，
+        也不去解析 shell/PowerShell 语法——只认 ``-k`` 后面跟的那个标识符，bash 的行尾
+        续行 ``\\`` 和 PowerShell 的 ``"-k","X"`` 数组写法都能被同一个正则覆盖
+        （标识符两侧的引号和逗号不参与匹配）。
+
+        SPEC.md 找不到时 skipTest 而不是失败：这个仓库里它一定在，但测试文件本身
+        应当能在只拷了 scripts 目录的环境里跑起来，缺文档不是检索层的缺陷。
+        """
+        listed = set(FIXTURE_TEST_CLASSES) | set(REAL_INDEX_TEST_CLASSES)
+        pattern = re.compile(r"-k[\s,\"']+([A-Za-z_][A-Za-z0-9_]*)")
+
+        sources = {"test_query_kb.py 的模块 docstring": __doc__ or ""}
+        spec = Path(__file__).resolve().parents[2] / "SPEC.md"
+        if spec.exists():
+            sources["SPEC.md"] = spec.read_text(encoding="utf-8")
+        else:
+            self.skipTest(f"SPEC.md 不存在，跳过文档侧比对：{spec}")
+
+        for label, text in sources.items():
+            with self.subTest(document=label):
+                mentioned = set(pattern.findall(text))
+                self.assertTrue(mentioned, f"{label} 里找不到任何 -k 参数，正则或文档结构变了")
+                self.assertEqual(
+                    listed - mentioned,
+                    set(),
+                    f"{label} 的 -k 命令漏了测试类，照文档实跑会少跑这些类",
+                )
+                self.assertEqual(
+                    mentioned - listed,
+                    set(),
+                    f"{label} 的 -k 命令里有不存在的类名",
+                )
 
     def test_fixture_classes_do_not_reference_the_real_database(self):
         # Step 1 of SPEC 3.2 runs before the rebuild. If a fixture class read the live

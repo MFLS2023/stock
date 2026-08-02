@@ -35,6 +35,20 @@ RECALL_COLUMNS = ("text", "title", "author")
 # 阶段 2 不碰权重，只保证这两把尺子在一次查询里不混用。
 SUBSTRING_RANK = 0.0
 
+# 短词走 GLOB，而 GLOB 是大小写敏感的——这是它与 MATCH、LIKE 唯一不一致的地方，
+# 也是本轮修的回归：`AI` 召回 144 块、`ai` 83 块、`Ai` 3 块，而三列不区分大小写的
+# 并集是 218 块，三个查询各自丢 74/135/215 条。同一个词换个大小写就换一批结果。
+#
+# 折叠范围严格限定在 **ASCII 字母**，用显式字符集而不是 `str.isalpha()`。因为验收
+# 口径是"等于 text/title/author 的不区分大小写并集"，而那个并集由 SQLite 的
+# `lower()`/`LIKE` 定义，两者都只折 ASCII：`lower('Ａ')` 还是全角 `Ａ`，希腊 `Α`
+# 也不变。用 Python 的 `isalpha()` 会把全角字母和希腊字母一起折进去，召回比基准
+# 多出一批，等值断言反而失败——那是"更强"而不是"一致"，本轮不做。
+#
+# panfeng 的原文有拿希腊字母、拼音替代证券名称的规避写法（见 CLAUDE.md），所以
+# 非 ASCII 大小写不是纯理论问题，但它属于同义词归一，不是大小写折叠，两回事。
+ASCII_LETTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
 
 def glob_literal(term: str) -> str:
     """把用户输入转成只匹配自身的 GLOB 模式片段。
@@ -55,9 +69,43 @@ def glob_literal(term: str) -> str:
     return term.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]")
 
 
+def glob_fold_ascii_case(pattern: str) -> str:
+    """把已转义模式里的每个 ASCII 字母换成 ``[Aa]`` 形式的双字符类。
+
+    在**转义之后**折叠是安全的，顺序不可颠倒。glob_literal() 只会引入
+    ``[``、``]``、``*``、``?`` 四种字符，其中一个字母都没有，所以折叠这一遍不会碰到
+    转义产物的内部；反过来先折叠，得到的 ``[Aa]`` 会被接下来的转义改成 ``[[]Aa]``，
+    模式全错。
+
+    ``]`` 不用特殊处理：折叠只在字母位置插入完整闭合的字符类，``a]`` → ``[Aa]]``
+    在 GLOB 里读作"类 [Aa]，然后字面右括号"，仍是字面语义。
+
+    为什么用字符类而不是枚举大小写变体去做多次 GLOB：真库实测（2026-08-02），
+    查 ``AI`` 的三列并集，字符类一条模式 62.2ms，四个变体 × 三列共 12 条子查询
+    147.5ms，慢 2.4 倍，且变体数随字母个数翻倍（``5GAI`` 就是 8 个变体）。
+    两者结果集完全相同，也都等于不区分大小写并集。
+
+    也没有换成 LIKE：``LIKE`` 的 ASCII 折叠是天然的（真库同一查询 36.8ms，比字符类
+    更快），但 ``EXPLAIN QUERY PLAN`` 显示它在 chunks_fts 上退化为
+    ``SCAN chunks_fts VIRTUAL TABLE INDEX 0:``——不走 trigram 索引，只是这个库
+    （3362 块 / 48M）小到看不出差别；而字符类模式仍是 ``INDEX 0:G3``。同时 ``LIKE``
+    自带 ``%``/``_`` 另一套通配符，得再引入一层 ESCAPE 转义（且 SQLite 的
+    ``ESCAPE`` 只接受单字符），字面匹配的正确性要重新证一遍。保留 GLOB 就把阶段 2
+    已经验收过的元字符行为原样留住了。
+    """
+    return "".join(
+        f"[{character.upper()}{character.lower()}]" if character in ASCII_LETTERS else character
+        for character in pattern
+    )
+
+
 def glob_pattern(term: str) -> str:
-    """``*字面词*``：转义之后才在两侧加通配符，否则自己加的星号也会被转掉。"""
-    return f"*{glob_literal(term)}*"
+    """``*字面词*``：先转义元字符，再折叠 ASCII 大小写，最后才在两侧加通配符。
+
+    两侧的 ``*`` 必须最后加，否则自己加的星号也会被转掉；折叠夹在中间，
+    见 glob_fold_ascii_case() 里对顺序的说明。
+    """
+    return f"*{glob_fold_ascii_case(glob_literal(term))}*"
 
 
 def terms_from_query(query: str) -> list[str]:
@@ -133,9 +181,12 @@ def search(connection: sqlite3.Connection, query: str, source: str | None, autho
 
     * 全部检索词都 ≥3 字 → 一次 ``MATCH``，bm25 排序（与阶段 1 之前一致）。
     * 出现短词 → 候选集是 ``MATCH`` 命中与三列 ``GLOB`` 命中的并集（模式先经
-      glob_pattern() 转义，用户输入的 ``*``/``?``/``[`` 只匹配自身），
-      由 relevance() 排序。这一路没有 bm25 值可用，而 bm25 是负值、尺度与
-      relevance() 不同，混着排等于凭空发明一个换算规则——那是阶段 3 的事。
+      glob_pattern() 处理：用户输入的 ``*``/``?``/``[`` 只匹配自身，ASCII 字母
+      不分大小写），由 relevance() 排序。这一路没有 bm25 值可用，而 bm25 是负值、
+      尺度与 relevance() 不同，混着排等于凭空发明一个换算规则——那是阶段 3 的事。
+
+    两条路径的大小写行为一致：``MATCH`` 本来就不区分（``AI硬件`` 与 ``ai硬件`` 实测
+    同为 8 块），短词路径靠 glob_pattern() 里的字符类折叠对齐到同一口径。
 
     两条路径都先拿到完整候选再在 Python 侧切片。SQL 里不留任何 rowid 预截断：
     旧实现的 ``LIMIT max(limit*30, 120)`` 没有 ORDER BY，按插入顺序截断，
@@ -174,9 +225,10 @@ def search(connection: sqlite3.Connection, query: str, source: str | None, autho
         params.append(match_expression(long_terms))
     for term in short_terms:
         for column in RECALL_COLUMNS:
-            # GLOB 是精确子串且大小写敏感，实测在 trigram 表上走索引
-            # （VIRTUAL TABLE INDEX 0:G4，18.2ms vs chunks 全表扫 191.4ms）。
-            # 模式经 glob_pattern() 转义，用户输入里的 * ? [ 只匹配自身。
+            # GLOB 是精确子串，实测在 trigram 表上走索引（VIRTUAL TABLE INDEX 0:G3，
+            # 三列并集 62.2ms vs chunks 全表扫 191.4ms），带字符类的模式同样走。
+            # 模式经 glob_pattern() 处理：元字符转成字面量，ASCII 字母折成 [Aa] 字符类
+            # 抹掉 GLOB 自带的大小写敏感——否则 AI/ai/Ai 会各返回一批不同的结果。
             clauses.append(f"SELECT chunk_id FROM chunks_fts WHERE {column} GLOB ?")
             params.append(glob_pattern(term))
 

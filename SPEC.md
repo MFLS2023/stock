@@ -123,6 +123,12 @@
 
 以下全部是 2026-08-02 在 `knowledge.db`（3176 块）上只读实测得到，不是估算。
 
+**本节的数字是修复前的历史快照，不是当前基线。** 三个缺陷此后逐个修掉，数据清洁
+（`clean_text()` 删 NUL）又让若干正文命中数变准，所以这里的 `情绪周期` 202、
+`龙头` 615、`情绪` 888 都已过时。当前基线看 3.1 节阶段 2 的表格
+（对应值分别是 203 / 616 / 889）。保留原值是因为它们是**缺陷成因的存档**——
+换成修好之后的数字，这一节就读不出当初错在哪了。
+
 #### 缺陷 A：FTS 索引被 topics 标签污染
 
 `build_index.py:89` 把 `topics` 列一起塞进 `chunks_fts`。而 topics 由
@@ -395,6 +401,10 @@ echo "退出码=$?"
 上表其余 11 项已在阶段 2 摘除（实现同提交），其中 9 项按"修复后的事实"改写并改名
 （名字里的 `must_` / `fallback` 去掉——兜底路径已删除），2 项仅去掉装饰器保留原名。
 
+**阶段 2 代码修订（Codex 复审后）不改变这张表。** 修订修的是三个阻断项——短词
+ASCII 大小写折叠、fixture 子集命令漏类与过时计数、NUL 清洁范围声明与硬断言——
+新增 20 项普通断言，一个 `expectedFailure` 都没加，剩余仍恰好 1 项且仍属阶段 3。
+
 阶段 1 摘除的三项（实现同提交）：
 `IndexPollutionTests.test_topic_label_must_not_match_full_text_search`、
 `IndexPollutionTests.test_hits_must_converge_on_prose_matches`（改名为
@@ -414,9 +424,15 @@ echo "退出码=$?"
 #### 阶段 0：检索层回归测试
 
 - 从项目根目录用 3.0 节的命令可运行
-- `test_kb_import_utils` 27 项不受影响
+- `test_kb_import_utils` 34 项不受影响
 - 测试覆盖三个缺陷，每个缺陷至少一条 fixture 用例 + 一条真库用例
-- 阶段 0 是唯一允许留 `expectedFailure` 的提交
+- 阶段 0 的提交里全部 15 个 `expectedFailure` 都还留着（三个缺陷此时一个都没修）
+
+初版这里写的是"阶段 0 是唯一允许留 `expectedFailure` 的提交"，与 3.0 节的生命周期
+规则第 2、5 条直接冲突——那两条说的是"尚未实施的后续阶段允许继续保留"、
+"阶段 3 完成后才必须归零"。按 3.0 节为准：**已完成阶段的标记必须在同一提交里摘除，
+未实施的后续阶段可以保留，阶段 3 之后归零。** 阶段 1 留 12 项、阶段 2 留 1 项都是
+合规的中间状态，不是遗留问题。
 
 #### 阶段 1：FTS 去污染
 
@@ -537,16 +553,66 @@ echo "退出码=$?"
 样本侧用 `REGRESSION_SAMPLE` 常量过滤后与冻结值比较，全库侧用
 `registered_sources()` 动态计算。
 
+**两字 ASCII 词的大小写**（本轮修订新增的验收项，数字为全库口径实测）：
+
+| 词 | 修订前召回 | 通过标准 | 实测（修订后） |
+|---|--------|---------|---------|
+| `AI` | 144 | 召回 = 218，且四种写法集合相等 | 218 ✅ |
+| `ai` | 83 | 同上 | 218 ✅ |
+| `Ai` | 3 | 同上 | 218 ✅ |
+| `aI` | 0 | 同上 | 218 ✅ |
+
+218 = `text`/`title`/`author` 三列**不区分大小写**的去重并集（`lower()` + `instr` 口径）。
+四个集合逐条相等，不只是计数相等；仅 `topics` 含词的块漏入 0 条。
+
 附加（均已实测通过）：
 - 结果里 `chunk_id` 唯一，无重复
 - 空查询、纯标点查询不抛异常
-- `--source` / `--author` 过滤仍生效
+- `--source` / `--author` 过滤仍生效，含大小写折叠后的查询
 - 混合长短词（`竞价 弱转强`）两个词都参与召回，不再静默丢弃短词
+- 混合长短词里的短词同样折叠（`AI 弱转强` 与 `ai 弱转强` 结果相同）
 
 **实现方式**（阶段 2 落地，仅改 `query_kb.py`）：全部检索词都 ≥3 字时走一次 `MATCH`
 并用 bm25 排序，与之前一致；一旦出现两字词，候选集改为 `MATCH` 命中与三列
 `GLOB '*词*'` 命中的 `UNION`，由 `relevance()` 排序。两把标尺不在同一次查询里混用——
 bm25 是负值且尺度与 `relevance()` 不同，换算规则归阶段 3。
+
+**短词的 ASCII 大小写必须折叠**（本轮修订补上的回归）。`GLOB` 是大小写敏感的，
+这是它与 `MATCH`、`LIKE` 唯一不一致的地方，于是阶段 2 把短词改走 `GLOB` 之后，
+两字英文词按大小写分裂成了几批不同的结果。实测（真库 2026-08-02，修复前）：
+
+| 查询 | 召回 | 与不区分大小写并集的差 |
+|---|-----|--------------|
+| `AI` | 144 | 少 74 |
+| `ai` | 83 | 少 135 |
+| `Ai` | 3 | 少 215 |
+| `aI` | 0 | 少 218 |
+
+`text`/`title`/`author` 三列不区分大小写的并集是 **218**。对照组：三字以上走 `MATCH`
+本来就不区分大小写（`AI硬件` 与 `ai硬件` 同为 8 块），被删掉的 `LIKE` 兜底路径也不
+区分——所以这是短词路径独有的回归，不是设计。
+
+修法是在 `glob_pattern()` 里把已转义模式中的每个 ASCII 字母折成 `[Aa]` 双字符类
+（`AI` → `*[Aa][Ii]*`）。**顺序是先转义再折叠**：反过来的话 `glob_literal()` 会把
+折叠产生的 `[Aa]` 改成 `[[]Aa]`，模式全错。修复后四种写法召回同为 218，集合逐条相等。
+
+折叠范围严格限定 **ASCII 字母**，与 SQLite 的 `lower()` 口径对齐——`lower('Ａ')` 仍是
+全角 `Ａ`，希腊 `Α` 也不变。用 Python 的 `isalpha()` 会把全角和希腊字母一起折进去，
+召回超出基准，等值断言反而失败：那是"更强"而不是"一致"，本轮不做。
+
+**为什么不用变体枚举，也不换 LIKE**（真库实测，三列并集一次查询）：
+
+| 方案 | `AI` 耗时 | 查询计划 | 说明 |
+|-----|--------|--------|-----|
+| 字符类 `*[Aa][Ii]*` | **62.2ms** | `INDEX 0:G3` | 采用 |
+| 枚举 4 个大小写变体 | 147.5ms | `INDEX 0:G3` | 慢 2.4 倍，变体数随字母个数翻倍 |
+| `LIKE '%ai%' ESCAPE` | 36.8ms | `INDEX 0:` | 更快但**不走 trigram 索引** |
+
+三者结果集完全相同。`LIKE` 在这个库（3362 块 / 48M）上更快只是因为库小到看不出全表
+扫的代价，且它自带 `%`/`_` 另一套通配符，得再引入一层 `ESCAPE` 转义（SQLite 的
+`ESCAPE` 只接受单字符），阶段 2 已验收过的元字符行为要重新证一遍。保留 `GLOB`。
+中文八词的召回不受影响（字符类只在 ASCII 字母位置插入），实测全库仍为
+453 / 422 / 928 / 194 / 1303 / 111 / 516 / 52。
 
 **用户输入先转义 GLOB 元字符**，再在两侧加 `*`。SQLite 的 `GLOB` 没有 `ESCAPE` 子句
 （那是 `LIKE` 才有的），反斜杠也不是转义符，只能把元字符包进字符类：
@@ -576,12 +642,42 @@ NUL 在这里没有语义：它只出现在字体损坏的 PDF 文本层抽出�
 `clean_text()` 是因为 `import_nanjinglu.py:312` 让每一页文本都必经这一关，且清洗
 发生在读缓存**之后**——因此重跑导入**不需要** `--force`，不必重新 OCR。
 
-修复后 `source_libraries/nanjinglu_bian` 与 `knowledge.db`（`chunks`、`parents`、
-`chunks_fts` 全部文本列）的 NUL 计数均为 0，`instr` 与 `LIKE` 两个口径在八个验收词
-上逐词一致。受影响的数字：`龙头` 正文 615→616、样本并集 925→926、全库并集
-927→928；`情绪` 正文 888→889、标题独有 406→405；`情绪周期` 正文 202→203、标题
-独有 313。并集总数只有 `龙头` 变了（多召回那一块），`情绪` 和 `情绪周期` 是归属
-从"仅标题含"移到"正文也含"，并集不变。
+**清洁范围：可索引产物 + 数据库，不含原始提取缓存。**
+
+修复后 **可索引产物**（各来源 `texts/` 下的文本，以及 `documents.jsonl`、
+`parents.jsonl`、`chunks.jsonl` 和存在时的 `methods.jsonl`、`conflicts.jsonl`）与
+`knowledge.db`（`chunks`、`parents`、`chunks_fts` 全部文本列）的 NUL 计数均为 0；
+**`page_texts` 原始提取缓存允许保留 NUL，但不得直接进入索引**——缓存内容必经
+`clean_text()` 才落进产物。`instr` 与 `LIKE` 两个口径在八个验收词上逐词一致。
+
+初版这一行写的是"`source_libraries/nanjinglu_bian` 与数据库 NUL 均为 0"，范围写宽了。
+实测（2026-08-02）：`nanjinglu_bian/page_texts` 下 312 个缓存文件里，41 个文件、
+共 651 个 NUL，来自 4 个文档（`nanjinglu-554254de485c`、`-92154afd0e2c`、
+`-92f3ed9047ee`、`-c0bf0cd2860c`）。它们并不违反契约——`import_nanjinglu.py:312` 让
+每页文本在读缓存**之后**过 `clean_text()`，NUL 在那一步删掉，所以产物和库都是干净的，
+不需要重新 OCR，也不必清理缓存。
+
+**扫原始字节会漏掉这 651 个**：JSON 把 NUL 序列化成六个 ASCII 字符 `\u0000`，缓存
+文件的原始字节里 0x00 计数是 **0**。所以验收断言必须解析 JSON、递归检查字符串值，
+不能 `grep -c $'\0'`。这条已写成测试
+（`RegistryScopedIndexTests.test_the_indexable_products_carry_no_nul_bytes`，
+动态覆盖 `source_libraries` 全部来源；`test_the_nul_check_actually_detects_an_escaped_nul`
+守住"按 JSON 值查"这个口径不退化成字节扫描）。
+
+受影响的数字：`龙头` 正文 615→616、样本并集 925→926、全库并集 927→928；
+`情绪` 正文 888→889、标题独有 406→405；`情绪周期` 正文 202→203、标题独有 313。
+并集总数只有 `龙头` 变了（多召回那一块），`情绪` 和 `情绪周期` 是归属从"仅标题含"
+移到"正文也含"，并集不变。
+
+**数据清洁之后的当前基线**（2026-08-02 实测，回归样本口径）：
+
+| 词 | 正文 | 标题/作者独有 | 三字段并集 |
+|---|-----|---------|---------|
+| `情绪` | 889 | 405 | 1294 |
+| `情绪周期` | 203 | 313 | 516 |
+
+清洁之前是 `情绪` 888 / 406、`情绪周期` 202 / 314。**旧数字只能作为历史快照引用，
+必须标注"清洁前"**，不得当作当前基线。
 
 回归防线两条：按列硬断言三张表的所有文本列 NUL 计数为 0；按结果断言八个验收词的
 `instr` 并集与 `LIKE` 并集逐词相等——后者即便将来出现别的 C 字符串陷阱也会先失败。
@@ -763,8 +859,8 @@ export PYTHONIOENCODING=utf-8
 PY="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe"
 S="-s _知识库系统/scripts -t _知识库系统/scripts"
 FIXTURE="-k FixtureShapeTests -k IndexPollutionTests -k ShortTermSearchTests \
-         -k SourceCoverageTests -k RetrievalContractTests -k SubsetMarkerTests \
-         -k SourceRegistryTests"
+         -k SourceCoverageTests -k RetrievalContractTests -k GlobEscapingTests \
+         -k AsciiCaseRecallTests -k SubsetMarkerTests -k SourceRegistryTests"
 REAL="-k RealIndexRequirementTests -k RealIndexTests -k RegistryScopedIndexTests"
 
 # 1. fixture 单元测试（纯内存，不碰 knowledge.db）
@@ -798,8 +894,8 @@ $env:PYTHONIOENCODING = "utf-8"
 $PY = "$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 $S = @("-s","_知识库系统/scripts","-t","_知识库系统/scripts")
 $FIXTURE = @("-k","FixtureShapeTests","-k","IndexPollutionTests","-k","ShortTermSearchTests",
-             "-k","SourceCoverageTests","-k","RetrievalContractTests","-k","SubsetMarkerTests",
-             "-k","SourceRegistryTests")
+             "-k","SourceCoverageTests","-k","RetrievalContractTests","-k","GlobEscapingTests",
+             "-k","AsciiCaseRecallTests","-k","SubsetMarkerTests","-k","SourceRegistryTests")
 $REAL = @("-k","RealIndexRequirementTests","-k","RealIndexTests","-k","RegistryScopedIndexTests")
 
 & $PY -m unittest discover @S @FIXTURE -v ; "退出码=$LASTEXITCODE"
@@ -826,11 +922,19 @@ Remove-Item Env:KB_REQUIRE_REAL_INDEX
 第三条是实测踩出来的坑，不是假想：`RegistryScopedIndexTests` 最初命名为
 `RegisteredSourceCoverageTests`，其中包含 `SourceCoverageTests`，于是
 `-k SourceCoverageTests` 把这个真库类一起收进了 fixture 子集——第 1 步实取 55 项
-而非预期的 48 项，多出的 7 项在重建索引之前就读了旧库。改名后加总与
-`test_query_kb.py` 全量一致（当前 51 + 25 = 76）。
+而非预期的 48 项（**历史值**，当时的类数与用例数），多出的 7 项在重建索引之前就读了
+旧库。改名后加总与 `test_query_kb.py` 全量一致（当前 78 + 40 = 118）。
 **所以给测试类命名时不能让一个名字包含另一个。**
 
-**多个 `-k` 是 OR 关系**（已实测：`-k FixtureShapeTests -k IndexPollutionTests` → 13 项）。
+**光靠这四条守卫不够——它们只比对代码里的常量。** 本轮实测踩到第二个坑：
+`GlobEscapingTests` 加进了 `FIXTURE_TEST_CLASSES`，却没加进 SPEC 3.2 和
+`test_query_kb.py` 文件头的 `-k` 命令行，于是**照文档实跑只有 54 项而不是 64 项**，
+而四条守卫全部通过（常量本身是全的）。第五条守卫
+`test_the_documented_commands_list_every_subset_class` 补上这个缺口：它从本文件和
+`test_query_kb.py` 的 docstring 里正则抽出所有 `-k <名字>`，与两份常量做集合比较。
+**新增测试类时要改三处**：常量、SPEC 3.2 的两份命令、文件头 docstring 的命令。
+
+**多个 `-k` 是 OR 关系**（已实测：`-k FixtureShapeTests -k IndexPollutionTests` → 15 项）。
 
 **为什么不用 `-m unittest test_query_kb`**：从项目根目录直接这样跑会
 `FAILED (errors=1)`（`sys.path` 里没有 `scripts` 目录，模块导入不到）。已实测。
@@ -852,14 +956,18 @@ Remove-Item Env:KB_REQUIRE_REAL_INDEX
 `test_*.py` 一起收，单看总数无法判断某轮改动交付了多少测试。当前组成：
 
 ```
-Ran 108 tests = test_query_kb.py         76   ← 检索层（51 fixture + 25 真库）
-              + test_kb_import_utils.py  27   ← 导入工具共用逻辑
+Ran 157 tests = test_query_kb.py        118   ← 检索层（78 fixture + 40 真库）
+              + test_kb_import_utils.py  34   ← 导入工具共用逻辑
               + test_import_feishu_chat.py 5  ← panfeng 的载体解析（飞书 HTML）
 ```
 
+阶段 2 代码修订前是 `137 = 98（64 + 34）+ 34 + 5`（**历史值**）。修订新增 20 项：
+fixture 侧 `AsciiCaseRecallTests` 13 项 + `SubsetMarkerTests` 的文档守卫 1 项，
+真库侧 `RealIndexTests` 大小写三项 + `RegistryScopedIndexTests` 的可索引产物 NUL 三项。
+
 分文件计数用 `discover -p "test_query_kb.py"` 单跑取得，不要靠心算或相减；
 子集计数用 3.2 节的 `$FIXTURE` / `$REAL` 单跑取得，且两者之和必须等于
-`test_query_kb.py` 的全量数（当前 51 + 25 = 76），不等就是 `-k` 串台了。
+`test_query_kb.py` 的全量数（当前 78 + 40 = 118），不等就是 `-k` 串台了。
 
 #### 3.2.1 固定评测的证据要求
 
