@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 """Tests for the chunk-merging helpers shared by the importers.
 
-Run with the runtime that carries the importer dependencies:
-    python -m unittest test_kb_import_utils -v
+Run from the project root, same command as the rest of the suite:
+
+    export PYTHONIOENCODING=utf-8              # Git Bash; PowerShell: $env:PYTHONIOENCODING="utf-8"
+    python -m unittest discover -s _知识库系统/scripts -t _知识库系统/scripts -v
+
+Running ``python -m unittest test_kb_import_utils`` from the project root fails with
+an import error: sys.path lacks the scripts directory, so the module cannot be found.
+
+These are pure fixture tests — no database, no filesystem outside tmp — so they belong
+to step 1 of SPEC 3.2 and are safe to run before the index is rebuilt. To count them on
+their own, add ``-p "test_kb_import_utils.py"``; the unqualified discover collects every
+test module in the directory, so its total is not this file's count.
 """
 
 from __future__ import annotations

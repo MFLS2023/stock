@@ -5,6 +5,12 @@ indexes_root: _知识库系统/indexes
 default_adapter: generic_mixed
 generic_supported_extensions: [.md, .txt, .pdf, .docx, .jpg, .jpeg, .png]
 
+# 每个来源的可选字段（不写就自动推断，见 AGENTS.md）：
+#   smoke_query:        单来源可查性验收用的检索词，至少三个字符；不写则从该来源正文自动取
+#   author_smoke_query: --author 过滤验收用的检索词，至少三个字符；必须落在该作者自己写的块里，
+#                       不与 smoke_query 互相兜底；不写则从该作者的块里自动取
+#   author:             声明该来源有作者署名，值须是 chunks 里真实出现过的名字；
+#                       不写则读 chunks 的 author 列，两边都没有就不测这项
 sources:
   - id: fulibei
     display_name: 复利杯
