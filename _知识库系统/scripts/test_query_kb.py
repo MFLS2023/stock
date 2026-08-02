@@ -12,20 +12,23 @@ Two subsets, for the rebuild ordering in SPEC 3.2. Step 1 runs before the index 
 rebuilt, so it must not touch the database at all — otherwise it reads the *old*
 index and reports on data the run is about to replace:
 
-    ... discover ... -k FixtureShapeTests -k IndexPollutionTests \
-                     -k ShortTermSearchTests -k SourceCoverageTests \
-                     -k RetrievalContractTests -k GlobEscapingTests \
-                     -k AsciiCaseRecallTests -k SubsetMarkerTests \
-                     -k SourceRegistryTests
-    ... discover ... -k RealIndexRequirementTests -k RealIndexTests \
-                     -k RegistryScopedIndexTests                 # after rebuild
+    FIXTURE="-k FixtureShapeTests -k IndexPollutionTests -k ShortTermSearchTests \
+             -k SourceCoverageTests -k RetrievalContractTests -k GlobEscapingTests \
+             -k AsciiCaseRecallTests -k SubsetMarkerTests -k SourceRegistryTests"
+    REAL="-k RealIndexRequirementTests -k RealIndexTests -k RegistryScopedIndexTests"
+
+    python -m unittest discover $S $FIXTURE -v                      # 步骤 1，重建索引前
+    KB_REQUIRE_REAL_INDEX=1 python -m unittest discover $S $REAL -v  # 步骤 3，重建之后
 
 ``test_the_subset_markers_cover_every_test_class`` keeps those two lists exhaustive:
 add a class without listing it and that test fails. And
 ``test_the_documented_commands_list_every_subset_class`` keeps *these* command lines in
 sync with the lists — the earlier revision only guarded the code constants, so both this
 docstring and SPEC 3.2 silently dropped ``-k GlobEscapingTests`` and the documented
-fixture command ran 54 cases where 64 were intended.
+fixture command ran 54 cases where 64 were intended. The two lists above are written as
+``FIXTURE=``/``REAL=`` assignments, in the same shape as SPEC 3.2's Git Bash block, so
+that guard can locate and check **each** list on its own instead of pooling every ``-k``
+in the file into one set — pooling let one list cover for another's omission.
 
 Two source scopes, deliberately kept apart — see REGRESSION_SAMPLE and source_registry().
 Frozen row counts and hit counts are asserted against the sample; everything phrased as
@@ -394,9 +397,15 @@ def fts_hits(connection: sqlite3.Connection, term: str, column: str | None = Non
 def glob_hits(connection: sqlite3.Connection, term: str, column: str = "text") -> int:
     """Substring match on the FTS table via GLOB, which SPEC 2.2 picks for short terms.
 
-    Measured on the real index: GLOB uses the trigram index (VIRTUAL TABLE INDEX 0:G4,
-    18.2ms) and returns exactly the prose-match count, while LIKE falls back to a scan
-    (187.4ms) because SQLite's LIKE is case-insensitive by default.
+    Measured on the real index: GLOB returns exactly the prose-match count, which is what
+    this helper is for. Do not read a performance claim into it — a short GLOB pattern has
+    no three consecutive literal characters, so it cannot use the trigram postings and
+    degrades to a linear scan. ``EXPLAIN QUERY PLAN`` showing ``INDEX 0:G<n>`` only means
+    the virtual table accepted the GLOB constraint. See query_kb.glob_fold_ascii_case()
+    for the controlled measurement and SPEC stage 2 for the large-corpus acceptance gate.
+
+    Note this helper takes the term raw (no escaping, no case folding) because callers
+    pass known-plain terms; the query layer itself goes through ``glob_pattern``.
     """
     sql = f"SELECT count(*) FROM chunks_fts WHERE {column} GLOB ?"
     return connection.execute(sql, [f"*{term}*"]).fetchone()[0]
@@ -2002,6 +2011,45 @@ def json_string_values(value):
             yield from json_string_values(nested)
 
 
+def json_nul_count(value) -> int:
+    """一个 JSON 值里所有字符串（含嵌套、含键）的 NUL 总数。"""
+    return sum(text.count("\x00") for text in json_string_values(value))
+
+
+def jsonl_nul_offenders(path: Path) -> list[str]:
+    """逐行解析 JSONL，返回 ``第N行 M 个`` 形式的问题清单，干净则是空列表。
+
+    真库检查和故障注入测试**共用这一个函数**，故意的。两边各写一份检测逻辑的话，
+    真库那份退化成按原始字节 grep 也照样绿——注入测试用自己那份正确逻辑通过了，
+    真库那份的缺陷无人看守。共用之后，退化会同时让两条失败。
+
+    为什么必须解析 JSON：JSON 把 NUL 序列化成六个 ASCII 字符 ``\\u0000``，
+    原始字节里根本没有 0x00。见 test_the_nul_check_actually_detects_an_escaped_nul。
+    """
+    offenders: list[str] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        count = json_nul_count(json.loads(line))
+        if count:
+            offenders.append(f"第{number}行 {count} 个")
+    return offenders
+
+
+def json_file_nul_count(path: Path) -> int:
+    """整份 JSON 文件（非 JSONL）里的 NUL 总数。page_texts 缓存是这个形状。"""
+    return json_nul_count(json.loads(path.read_text(encoding="utf-8")))
+
+
+def text_file_nul_count(path: Path) -> int:
+    """纯文本文件解码后的 NUL 数。
+
+    ``errors="surrogateescape"`` 是为了让非法字节也能读进来而不抛异常——目的是查 NUL，
+    不是校验编码，读不进去就查不到才是真问题。
+    """
+    return path.read_text(encoding="utf-8", errors="surrogateescape").count("\x00")
+
+
 def frequent_trigrams(texts, limit: int = 200) -> list[str]:
     """CJK trigrams ranked by how many of ``texts`` contain them.
 
@@ -2327,8 +2375,9 @@ class RegistryScopedIndexTests(unittest.TestCase):
 
         为什么必须解析 JSON 而不是扫原始字节：JSON 把 NUL 序列化成六个 ASCII 字符
         ``\\u0000``，原始字节里根本没有 0x00。实测 page_texts 缓存就是这样——312 个
-        文件原始字节 NUL 计数为 0，解码后有 651 个（2026-08-02）。按字节 grep 会报
-        "全部干净"，那正是这条断言存在的理由。
+        缓存文件原始字节 NUL 计数全为 0，而其中 41 个解码后共有 651 个（2026-08-02）。
+        按字节 grep 会报"全部干净"，那正是这条断言存在的理由。检测逻辑走共用的
+        ``jsonl_nul_offenders()``，故障注入测试调的是同一个函数，退化会同时暴露。
 
         **page_texts 明确排除在外**，因为它是 PDF 文本层/OCR 的原始提取缓存，不是
         可索引产物：``import_nanjinglu.py`` 读缓存**之后**才过 ``clean_text()``
@@ -2355,29 +2404,18 @@ class RegistryScopedIndexTests(unittest.TestCase):
                         continue
                     checked_files += 1
                     with self.subTest(source=source.name, file=path.name):
-                        count = path.read_text(encoding="utf-8", errors="surrogateescape").count(
-                            "\x00"
-                        )
+                        count = text_file_nul_count(path)
                         self.assertEqual(count, 0, f"{path} 有 {count} 个 NUL")
 
             # 2. 结构化产物：递归检查每个 JSON 字符串值。methods/conflicts 只有部分来源有。
+            #    走共用的 jsonl_nul_offenders()，与故障注入测试是同一份检测逻辑。
             for name in INDEXABLE_JSONL:
                 path = source / name
                 if not path.exists():
                     continue
                 checked_files += 1
                 with self.subTest(source=source.name, file=name):
-                    offenders: list[str] = []
-                    for number, line in enumerate(
-                        path.read_text(encoding="utf-8").splitlines(), start=1
-                    ):
-                        if not line.strip():
-                            continue
-                        count = sum(
-                            value.count("\x00") for value in json_string_values(json.loads(line))
-                        )
-                        if count:
-                            offenders.append(f"第{number}行 {count} 个")
+                    offenders = jsonl_nul_offenders(path)
                     self.assertEqual(offenders, [], f"{path} 含 NUL：{offenders[:5]}")
 
         self.assertGreater(checked_files, 0, "一个文件都没查到，断言在空转")
@@ -2387,18 +2425,34 @@ class RegistryScopedIndexTests(unittest.TestCase):
 
         不是多余的自测。上一条的关键在于"解析 JSON 之后再查"，而一个改成按原始字节
         grep 的实现会在真库上照样通过（page_texts 就是活证据：原始字节 0、解码后 651）。
-        这条在临时目录里造一行 ``{"text": "a\\u0000b"}``，按字节查看不见、按 JSON 值查
-        看得见，两种口径都断言一次，所以退化成字节扫描会让这条失败。
+
+        关键是这条调用的是**上一条真正用的那个函数** ``jsonl_nul_offenders()``，
+        不是在这里另写一份检测。本轮修订之前这里复制了一份逻辑，于是真库那份退化成
+        字节扫描时，这条仍然会绿——注入测试只证明了自己那份复制品是对的。现在共用，
+        真库那份一退化，这条立刻失败。
+
+        除了调共用函数，还独立钉住"字节看不见、解码看得见"这个前提本身：
+        原始字节 0 个 0x00，但含 ``\\u0000`` 字面，解码后 3 个（``text`` 里 1 个、
+        嵌套列表里 1 个、键名里 1 个——键也要覆盖）。
         """
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "chunks.jsonl"
-            path.write_text(json.dumps({"text": "a\x00b", "nested": {"t": ["c\x00"]}}) + "\n",
-                            encoding="utf-8")
+            payload = {"text": "a\x00b", "nested": {"t": ["c\x00"]}, "k\x00ey": "干净"}
+            path.write_bytes(
+                (json.dumps(payload, ensure_ascii=False) + "\n{}\n").encode("utf-8")
+            )
+
             raw = path.read_bytes()
             self.assertEqual(raw.count(b"\x00"), 0, "JSON 应把 NUL 转义，原始字节里没有 0x00")
-            self.assertIn(b"\\u0000", raw)
-            decoded = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(sum(v.count("\x00") for v in json_string_values(decoded)), 2)
+            self.assertIn(b"\\u0000", raw, "转义后的 NUL 应以六个 ASCII 字符出现")
+
+            # 真库检查用的同一个函数：命中第 1 行 3 个，第 2 行的 {} 不报。
+            self.assertEqual(jsonl_nul_offenders(path), ["第1行 3 个"])
+
+            # 干净文件必须返回空列表，否则这条只证明了"总是报错"。
+            clean = Path(directory) / "clean.jsonl"
+            clean.write_bytes((json.dumps({"text": "干净"}, ensure_ascii=False) + "\n").encode())
+            self.assertEqual(jsonl_nul_offenders(clean), [])
 
     def test_the_page_texts_cache_is_excluded_on_purpose(self):
         """豁免范围本身也要有断言，否则"排除了什么"只活在注释里。
@@ -2410,34 +2464,65 @@ class RegistryScopedIndexTests(unittest.TestCase):
 
         缓存里的 NUL 数量不写死：那是 OCR 输出的属性，重跑 OCR 会变。断言只要求
         "仍然存在"，一旦将来清零，这条会失败并提示可以撤掉豁免——那时豁免才是死代码。
+
+        一个 page_texts 目录都找不到时**明确失败，不 skipTest**。本轮修订改的：
+        skip 与"验收零 skip"的口径冲突，而且"跳过"这个结果本身没有信息——豁免究竟
+        还需不需要，读输出的人看不出来。没有缓存目录意味着 INDEXABLE_JSONL 那条排除
+        规则和它的注释成了无人核验的声明，该删，所以失败并把话说清楚是对的处理。
         """
         library = DATABASE.parents[1] / "source_libraries"
         caches = sorted(library.glob("*/page_texts"))
-        if not caches:
-            self.skipTest("没有来源使用 page_texts 缓存，豁免无从验证")
+        self.assertTrue(
+            caches,
+            f"{library} 下没有任何 page_texts 缓存目录。豁免已成死代码："
+            "把 INDEXABLE_JSONL 注释里的 page_texts 排除说明和这条测试一起删掉",
+        )
         total = 0
         for cache in caches:
             for path in sorted(cache.rglob("*.json")):
-                total += sum(
-                    value.count("\x00")
-                    for value in json_string_values(json.loads(path.read_text(encoding="utf-8")))
-                )
+                total += json_file_nul_count(path)
             # 同一个来源的可索引产物必须干净：豁免只针对 page_texts 这个目录。
             for name in INDEXABLE_JSONL:
                 path = cache.parent / name
                 if not path.exists():
                     continue
                 with self.subTest(source=cache.parent.name, file=name):
-                    count = sum(
-                        value.count("\x00")
-                        for line in path.read_text(encoding="utf-8").splitlines()
-                        if line.strip()
-                        for value in json_string_values(json.loads(line))
+                    self.assertEqual(
+                        jsonl_nul_offenders(path),
+                        [],
+                        f"{path} 含 NUL——豁免只针对 page_texts，不放过同来源的产物",
                     )
-                    self.assertEqual(count, 0)
         self.assertGreater(
             total, 0, "page_texts 已经没有 NUL 了，可以撤掉豁免并把它一起纳入检查"
         )
+
+
+K_NAME = re.compile(r"-k[\s,\"']+([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def assignment_k_names(text: str, variable: str) -> set[str] | None:
+    """抽出 ``variable=`` 这一个赋值块里的 ``-k`` 类名，找不到该赋值则返回 None。
+
+    用途见 SubsetMarkerTests.test_the_documented_commands_list_every_subset_class：
+    必须按赋值块隔离，把整篇文档的 ``-k`` 汇成一个集合会让一条命令的遗漏被另一条掩盖。
+
+    赋值起点认 ``FIXTURE=``（bash）和 ``$FIXTURE =``（PowerShell）两种写法，行首起、
+    允许缩进。终点是"空行"或"下一行以另一个 ``名字=`` 开头"——bash 的行尾续行 ``\\``
+    和 PowerShell 的括号换行都不产生空行，所以多行赋值能完整取到，而下一条赋值
+    （``REAL=``）不会被吞进来。
+
+    返回 set 而不是 list：``-k`` 的语义是 OR，同一个类名写两遍与写一遍等价，顺序也不
+    影响收集到哪些用例。是否重复不是本守卫要管的事。
+    """
+    start = re.search(rf"^[ \t]*\$?{re.escape(variable)}[ \t]*=", text, re.MULTILINE)
+    if start is None:
+        return None
+    body: list[str] = []
+    for line in text[start.end():].splitlines():
+        if body and (not line.strip() or re.match(r"^[ \t]*\$?[A-Za-z_][A-Za-z0-9_]*[ \t]*=", line)):
+            break
+        body.append(line)
+    return set(K_NAME.findall("\n".join(body)))
 
 
 # The -k names SPEC 3.2 uses to split the suite. Kept next to the check that enforces
@@ -2505,44 +2590,94 @@ class SubsetMarkerTests(unittest.TestCase):
                     self.fail(f"类名 {name} 是 {other} 的子串，-k {name} 会把两个都收进来")
 
     def test_the_documented_commands_list_every_subset_class(self):
-        """两份 `-k` 清单必须与**文档里的命令行**一致，不只与代码常量一致。
+        """每一条文档命令的 `-k` 清单**各自**必须等于对应常量。
 
-        这是本轮补上的守卫。原来只有 test_the_subset_markers_cover_every_test_class，
-        它比对的是 FIXTURE_TEST_CLASSES 和实际定义的类——两边都在代码里。于是
-        GlobEscapingTests 加进了常量、却没加进本模块 docstring 和 SPEC 3.2 的命令行，
-        照文档实跑只有 54 项而不是 64 项，而三条守卫全部通过。
+        这是本轮修订的守卫。第一版把整个 SPEC.md 里所有 ``-k`` 汇成一个集合再比对，
+        于是**一条命令的遗漏能被另一条掩盖**：从 Git Bash 的 FIXTURE 里删掉
+        ``-k AsciiCaseRecallTests``，因为 PowerShell 的 $FIXTURE 里还有，守卫照样通过；
+        两条官方命令都删掉的类，也可能被 SPEC 里其它举例用的 ``-k`` 顶上。
+        照文档实跑会少跑一整个类，而守卫是绿的。
 
-        做法是从文本里抽出所有 ``-k <名字>``，与常量做集合比较。不引入测试运行器，
-        也不去解析 shell/PowerShell 语法——只认 ``-k`` 后面跟的那个标识符，bash 的行尾
-        续行 ``\\`` 和 PowerShell 的 ``"-k","X"`` 数组写法都能被同一个正则覆盖
-        （标识符两侧的引号和逗号不参与匹配）。
+        改为逐块解析四份清单，每份单独断言：
 
-        SPEC.md 找不到时 skipTest 而不是失败：这个仓库里它一定在，但测试文件本身
-        应当能在只拷了 scripts 目录的环境里跑起来，缺文档不是检索层的缺陷。
+        1. 本模块 docstring 的 ``FIXTURE=`` / ``REAL=``
+        2. SPEC 3.2 Git Bash 的 ``FIXTURE=`` / ``REAL=``
+        3. SPEC 3.2 PowerShell 的 ``$FIXTURE =`` / ``$REAL =``
+
+        （PowerShell 的 ``$S``/``$PY`` 之类不参与——只找这两个名字。）
+
+        每份 fixture 清单单独等于 FIXTURE_TEST_CLASSES，real 清单单独等于
+        REAL_INDEX_TEST_CLASSES。断言的是**集合相等**而不是"包含"：多写一个不存在的
+        类名，``-k`` 不会报错、只是白跑，同样是文档与代码脱节。
+
+        赋值块的边界靠"下一个空行或下一行行首的 ``名字=``"判定，行尾续行 ``\\``
+        因此能跨行；``-k`` 后面的标识符两侧的引号、逗号不参与匹配，所以 bash 的
+        ``-k X`` 和 PowerShell 的 ``"-k","X"`` 用同一个正则。
+
+        SPEC.md 缺失时只查 docstring 那两份，不 skipTest：这个仓库里 SPEC.md 一定在，
+        但测试文件应当能在只拷了 scripts 目录的环境里跑起来，而"零 skip"是验收口径。
+        docstring 的两份在任何环境下都在，够构成一次有效断言。
         """
-        listed = set(FIXTURE_TEST_CLASSES) | set(REAL_INDEX_TEST_CLASSES)
-        pattern = re.compile(r"-k[\s,\"']+([A-Za-z_][A-Za-z0-9_]*)")
+        expected = {
+            "FIXTURE": set(FIXTURE_TEST_CLASSES),
+            "REAL": set(REAL_INDEX_TEST_CLASSES),
+        }
 
-        sources = {"test_query_kb.py 的模块 docstring": __doc__ or ""}
+        # 文档侧的每一段命令各算一份，不合并。SPEC.md 按 Markdown 围栏代码块切开——
+        # 不能用 text.find("PowerShell") 之类的关键词切：SPEC 里 "PowerShell" 这个词
+        # 早在 3.2 之前就出现过（第 296 行讲两个 shell 的差异），切出来的前半段不含
+        # 3.2 的 Git Bash 命令，那份就悄悄没被检查。围栏是唯一可靠的块边界。
+        # (标签, 语言, 正文)。语言单独存，不从标签里再切回来。
+        documents = [("test_query_kb.py 的模块 docstring", "docstring", __doc__ or "")]
         spec = Path(__file__).resolve().parents[2] / "SPEC.md"
         if spec.exists():
-            sources["SPEC.md"] = spec.read_text(encoding="utf-8")
-        else:
-            self.skipTest(f"SPEC.md 不存在，跳过文档侧比对：{spec}")
+            text = spec.read_text(encoding="utf-8")
+            for match in re.finditer(r"```(\w*)\n(.*?)```", text, re.DOTALL):
+                language, body = match.group(1) or "无语言标注", match.group(2)
+                # 入选条件是"真的有 FIXTURE 赋值"，不是"正文里出现 FIXTURE/REAL 字样"：
+                # 后者会把 3.1 那段只出现 KB_REQUIRE_REAL_INDEX 的命令块也拉进来。
+                if assignment_k_names(body, "FIXTURE") is not None:
+                    line = text.count("\n", 0, match.start()) + 1
+                    documents.append((f"SPEC.md 第 {line} 行的 {language} 块", language, body))
 
-        for label, text in sources.items():
-            with self.subTest(document=label):
-                mentioned = set(pattern.findall(text))
-                self.assertTrue(mentioned, f"{label} 里找不到任何 -k 参数，正则或文档结构变了")
-                self.assertEqual(
-                    listed - mentioned,
-                    set(),
-                    f"{label} 的 -k 命令漏了测试类，照文档实跑会少跑这些类",
+        blocks: dict[str, set[str]] = {}
+        for label, _language, body in documents:
+            for variable in expected:
+                found = assignment_k_names(body, variable)
+                if found is not None:
+                    blocks[f"{label} → {variable}"] = found
+
+        # 每一段命令都必须同时给出 FIXTURE 和 REAL，缺一份就是那份没被检查——属于
+        # "文档结构变了"，不是"文档没问题"。
+        for label, _language, _body in documents:
+            for variable in expected:
+                self.assertIn(
+                    f"{label} → {variable}",
+                    blocks,
+                    f"{label} 里没解析出 {variable} 赋值，正则或文档结构变了："
+                    f"已解析 {sorted(blocks)}",
                 )
+
+        # SPEC 3.2 承诺两个 shell 各给一版，两版都要被检查到。
+        if spec.exists():
+            covered = {language for _label, language, _body in documents}
+            for language in ("bash", "powershell"):
+                self.assertIn(
+                    language,
+                    covered,
+                    f"SPEC.md 里没找到带 FIXTURE/REAL 的 {language} 块，"
+                    f"3.2 的命令没了或围栏语言标注丢了：已解析 {sorted(blocks)}",
+                )
+
+        for key, names in blocks.items():
+            variable = key.rsplit(" ", 1)[-1]
+            with self.subTest(command=key):
                 self.assertEqual(
-                    mentioned - listed,
-                    set(),
-                    f"{label} 的 -k 命令里有不存在的类名",
+                    names,
+                    expected[variable],
+                    f"{key} 的 -k 清单与常量不一致，照文档实跑会少跑或多跑："
+                    f"漏了 {sorted(expected[variable] - names)}，"
+                    f"多了 {sorted(names - expected[variable])}",
                 )
 
     def test_fixture_classes_do_not_reference_the_real_database(self):

@@ -85,13 +85,23 @@ def glob_fold_ascii_case(pattern: str) -> str:
     147.5ms，慢 2.4 倍，且变体数随字母个数翻倍（``5GAI`` 就是 8 个变体）。
     两者结果集完全相同，也都等于不区分大小写并集。
 
-    也没有换成 LIKE：``LIKE`` 的 ASCII 折叠是天然的（真库同一查询 36.8ms，比字符类
-    更快），但 ``EXPLAIN QUERY PLAN`` 显示它在 chunks_fts 上退化为
-    ``SCAN chunks_fts VIRTUAL TABLE INDEX 0:``——不走 trigram 索引，只是这个库
-    （3362 块 / 48M）小到看不出差别；而字符类模式仍是 ``INDEX 0:G3``。同时 ``LIKE``
-    自带 ``%``/``_`` 另一套通配符，得再引入一层 ESCAPE 转义（且 SQLite 的
-    ``ESCAPE`` 只接受单字符），字面匹配的正确性要重新证一遍。保留 GLOB 就把阶段 2
-    已经验收过的元字符行为原样留住了。
+    也没有换成 LIKE，理由是**复用现有的字面转义语义**，不是索引性能：``LIKE`` 的
+    ASCII 折叠虽然天然（真库同一查询 36.8ms），但它自带 ``%``/``_`` 另一套通配符，
+    得再引入一层 ESCAPE 转义分支（且 SQLite 的 ``ESCAPE`` 只接受单字符），
+    glob_literal() 已经验收过的元字符字面行为要重新证一遍。保留 GLOB 就把阶段 2
+    的转义结论原样留住了。
+
+    **不要以为字符类模式走了 trigram 索引。** ``EXPLAIN QUERY PLAN`` 给出的
+    ``INDEX 0:G3`` 只说明虚拟表接收了 GLOB 约束，不代表通过 trigram postings 定位。
+    ``*[Aa][Ii]*`` 里没有任何连续三个字面字符，凑不出可用的 gram，本质是线性扫描。
+    受控实测（固定命中 50 行、只增填充行，2026-08-02）：表从 1000 涨到 100000 行
+    （100 倍），``*[Aa][Ii]*`` 0.545→68.1ms（125 倍）、``*AI*`` 0.196→21.2ms
+    （108 倍），都随数据量成正比；而含三个连续字面字符的 ``*弱转强*``
+    0.040→0.044ms、``MATCH '弱转强'`` 0.018→0.019ms（均 1.1 倍）才是真的走索引。
+    真库同样印证：``AI`` 三列并集 67.8ms、``竞价`` 44.1ms，而 ``弱转强`` 0.33ms。
+
+    所以短词路径的代价随语料线性上涨。当前 3362 块下几十毫秒可以接受，
+    **新增来源（如"爱在冰川"）之前必须重新做大语料性能验收**，见 SPEC 阶段 2。
     """
     return "".join(
         f"[{character.upper()}{character.lower()}]" if character in ASCII_LETTERS else character
@@ -225,10 +235,14 @@ def search(connection: sqlite3.Connection, query: str, source: str | None, autho
         params.append(match_expression(long_terms))
     for term in short_terms:
         for column in RECALL_COLUMNS:
-            # GLOB 是精确子串，实测在 trigram 表上走索引（VIRTUAL TABLE INDEX 0:G3，
-            # 三列并集 62.2ms vs chunks 全表扫 191.4ms），带字符类的模式同样走。
-            # 模式经 glob_pattern() 处理：元字符转成字面量，ASCII 字母折成 [Aa] 字符类
-            # 抹掉 GLOB 自带的大小写敏感——否则 AI/ai/Ai 会各返回一批不同的结果。
+            # GLOB 是精确子串匹配。模式经 glob_pattern() 处理：元字符转成字面量，
+            # ASCII 字母折成 [Aa] 字符类抹掉 GLOB 自带的大小写敏感——否则 AI/ai/Ai
+            # 会各返回一批不同的结果。
+            #
+            # 这条路径本质是**线性扫描**：两字模式凑不出三个连续字面字符，没有可用的
+            # trigram，耗时随语料成正比（受控实测 100 倍数据 → 125 倍耗时，
+            # 见 glob_fold_ascii_case() 的说明）。真库 3362 块下三列并集
+            # 『AI』67.8ms、『竞价』44.1ms，当前规模可接受；新增来源前要重做性能验收。
             clauses.append(f"SELECT chunk_id FROM chunks_fts WHERE {column} GLOB ?")
             params.append(glob_pattern(term))
 
