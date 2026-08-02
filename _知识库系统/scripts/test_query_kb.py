@@ -34,15 +34,22 @@ text, author coverage is scoped to sources that carry authorship, and per-term c
 computed from which sources actually hold matches. See smoke_query_for().
 
 Cases marked ``expectedFailure`` state the behaviour SPEC.md requires but the
-current code does not deliver. Two rules, per SPEC 3.0:
+current code does not deliver. Three rules, per SPEC 3.0:
 
 1. When a fix lands, the case flips to "unexpected success" and unittest exits
    with code **1**, not 0. That is a red build, not a green one. The marker must be
    deleted in the same commit as the fix, and the suite re-run to a plain PASS.
-2. A phase is only accepted when the run reports no expected failures, no
-   unexpected successes and no skips. Set ``KB_REQUIRE_REAL_INDEX=1`` to turn a
-   missing knowledge.db from a silent skip into a hard failure — without it,
-   RealIndexTests can skip 20-odd assertions and still print "OK".
+2. 尚未实施的后续阶段允许继续保留标记：那描述的是后面才动手的缺陷，此刻失败正是它
+   应有的状态。但输出里不得出现 ``unexpected successes`` 或 ``skipped``，剩余的
+   ``expected failures`` 必须逐项交代得出所属阶段。到阶段 3 完成时必须归零。
+3. Set ``KB_REQUIRE_REAL_INDEX=1`` to turn a missing knowledge.db from a silent skip
+   into a hard failure — without it, RealIndexTests can skip 20-odd assertions and
+   still print "OK".
+
+阶段 2 完成后剩余 1 项：``SourceCoverageTests.test_prose_matches_must_outrank_label_only_matches``
+（排序权重，阶段 3）。阶段 2 摘除了 11 项，其中 9 项按修复后的事实改写并改名——名字
+里的 ``must_`` 和 ``fallback`` 去掉了，因为 LIKE 兜底路径连同它按 rowid 截断的候选池
+一起被删除，``rank == 999.0`` 这个哨兵值不再出现在任何路径上。
 """
 
 from __future__ import annotations
@@ -58,7 +65,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from build_index import add_chunk, create_schema
-from query_kb import search
+from query_kb import glob_literal, glob_pattern, search
 
 
 # infer_topics() labels every chunk with 5-6 topics drawn from taxonomy.yaml. The
@@ -139,6 +146,15 @@ def chunk(
 TITLE_WITH_TERM = "竞价专题整理"
 AUTHOR_WITH_TERM = "竞价老师"
 
+# GLOB 元字符。两字词走 GLOB '*词*'，所以用户输入里的这几个字符会被当成通配语法：
+# 查 * 会匹配所有块，查 竞* 会匹配"竞"后面接任意内容，而 [ 单独出现让字符类不闭合，
+# 整个模式失效、一条都不匹配。转义前实测（真库 2026-08-02）：* 召回 3362 而字面命中
+# 45，? 召回 3362 对 614，竞* 召回 534 对 0，[ 召回 0 对 1864。
+#
+# fixture 里必须真有含这些字符的块，否则"召回 == 字面并集"两边都是空集，断言空转。
+# 每个字符给一块，正文里写死在固定位置。
+GLOB_METACHARACTER_TERMS = ("*", "?", "[", "**", "竞*", "A?")
+
 
 def build_fixture() -> sqlite3.Connection:
     """A miniature knowledge.db that reproduces the real index's skew.
@@ -181,10 +197,69 @@ def build_fixture() -> sqlite3.Connection:
             connection,
             chunk("tulip_garden", index, without_term(index), author=AUTHOR_WITH_TERM),
         )
-
     connection.execute("INSERT INTO metadata VALUES (?,?)", ("fts_tokenizer", tokenizer))
     connection.commit()
     return connection
+
+
+def build_glob_fixture() -> sqlite3.Connection:
+    """一个专门装 GLOB 元字符的小库，与 build_fixture() 分开。
+
+    没有把这些块加进主 fixture，是因为那边有一批钉死的绝对数字——标题命中 465、
+    165/310/475、两词并集 195——多塞几块就全要跟着改，而那些数字守的是别的性质。
+    这里只有元字符这一件事，形状可以随它自己的需要长。
+
+    每个元字符词一块，正文里字面写上它。另外三块用来卡住反向情形：
+    ``只有一个星号`` 那块让 ``**`` 有机会误命中（转义正确则不命中），
+    ``普通块`` 完全不含元字符，``竞价块`` 证明含元字符的查询不影响普通词的召回。
+    """
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    tokenizer = create_schema(connection)
+    for index, text in enumerate(
+        [
+            "第1节的记录里出现了 * 这样的符号，属于原始文本的一部分。",
+            "第2节写到 ? 这个问号，是作者自己打上去的。",
+            "第3节里有 [ 这个方括号，没有配对的右括号。",
+            "第4节连着写了 ** 两个星号，用来强调。",
+            "第5节提到 竞* 这种缩写形式。",
+            "第6节的表格标记是 A? 这样。",
+            "第7节只有一个星号 * 单独出现，后面不再跟第二个。",
+            "第8节是完全普通的复盘记录，一个特殊符号都没有。",
+            "第9节讨论开盘前的竞价，与符号无关。",
+        ],
+        start=1,
+    ):
+        add_chunk(connection, chunk("tulip_garden", index, text, topics="盘口"))
+    # 标题和作者各一块，证明三列都经过同样的转义——只对 text 转义会让另两列出错。
+    add_chunk(
+        connection,
+        chunk("tulip_garden", 50, "第50节正文不含符号。", title="标题里有 * 星号"),
+    )
+    add_chunk(
+        connection,
+        chunk("tulip_garden", 51, "第51节正文不含符号。", author="作者名带 ? 号"),
+    )
+    connection.execute("INSERT INTO metadata VALUES (?,?)", ("fts_tokenizer", tokenizer))
+    connection.commit()
+    return connection
+
+
+def literal_substring_ids(connection: sqlite3.Connection, term: str) -> set[str]:
+    """字面子串口径的 text/title/author 并集，元字符不作通配解释。
+
+    用 ``instr()`` 而不是 ``LIKE``：``LIKE`` 的 ``%``/``_`` 是另一套通配符，拿它当
+    "字面"的基准会把 ``_`` 这类输入也算错。``instr`` 是纯子串查找，没有元字符概念，
+    正好是 GLOB 转义之后应该等价于的语义。
+    """
+    return {
+        row[0]
+        for row in connection.execute(
+            "SELECT chunk_id FROM chunks "
+            "WHERE instr(text, ?) > 0 OR instr(title, ?) > 0 OR instr(author, ?) > 0",
+            [term] * 3,
+        )
+    }
 
 
 def sources_of(rows) -> dict[str, int]:
@@ -444,11 +519,16 @@ class IndexPollutionTests(unittest.TestCase):
 
 
 class ShortTermSearchTests(unittest.TestCase):
-    """SPEC 缺陷 B: query_kb.py drops terms shorter than three characters.
+    """SPEC 缺陷 B（阶段 2 已修）：短于三字的检索词曾被整个丢弃。
 
     Measured on the real database (2026-08-02): 竞价 394 prose matches / 0 FTS hits,
     筹码 367/0, 龙头 615/0, 打板 186/0, 情绪 888/0. Most trading vocabulary is
     two characters, so this is the highest-traffic entry point into the corpus.
+
+    MATCH 命中仍然是 0，而且永远是 0：trigram 建不出两字 gram，阶段 2 也没换
+    tokenizer。变的是 query_kb.py 不再按长度丢词——两字词改在 chunks_fts 的
+    text/title/author 三列上各自 GLOB '*词*' 后取并集。所以这个类里的断言全部挂在
+    search() 的返回上，不挂在 MATCH 计数上：换成别的修法验收标准也不变。
     """
 
     @classmethod
@@ -463,41 +543,39 @@ class ShortTermSearchTests(unittest.TestCase):
         return search(self.connection, query, None, None, limit)
 
     def test_two_character_term_finds_nothing_in_fts(self):
-        # Documents the root cause: trigram needs three characters to build a gram,
-        # and query_kb.py:34 filters the term out before it reaches MATCH.
+        # 根因，保留为通过的事实：trigram 要三个字符才能建一个 gram，所以两字词的
+        # MATCH 恒为 0，且只要不换 tokenizer 就一直是 0。阶段 2 保留 trigram，改走
+        # GLOB 子串路径，所以这条不是"必须可搜到"的验收线——那种断言永远不会通过。
         self.assertEqual(fts_hits(self.connection, "竞价"), 0)
 
-    def test_two_character_term_still_returns_results_via_fallback(self):
-        # The LIKE fallback hides the defect: results come back, so the failure is
-        # invisible until you check which sources they came from.
+    def test_two_character_term_returns_results(self):
+        # 阶段 2 前这条叫 ..._via_fallback：结果确实回来了，但来自 LIKE 兜底，
+        # 掩盖了来源偏斜。兜底已删除，结果现在来自 GLOB 召回路径。
         rows = self.search("竞价")
         self.assertEqual(len(rows), 8)
 
-    @unittest.expectedFailure
-    def test_two_character_term_must_not_need_the_fallback(self):
-        # 当前：0 命中，只能靠 LIKE 兜底。期望：FTS 或精确子串路径直接命中正文 150 条。
-        # rank 999.0 是 query_kb.py 给 LIKE 回退结果打的固定分，用它识别走了哪条路。
+    def test_two_character_term_does_not_come_from_a_fallback(self):
+        # 阶段 2 摘除 expectedFailure。rank 999.0 曾是 LIKE 兜底的固定分，用它识别
+        # 结果走了哪条路；兜底连同它按 rowid 截断的候选池一起删掉，这个值不再出现。
         rows = self.search("竞价")
         self.assertTrue(all(row["rank"] != 999.0 for row in rows))
 
-    @unittest.expectedFailure
-    def test_two_character_term_must_reach_full_recall_without_the_fallback(self):
-        # 当前：FTS 命中 0，全靠 LIKE 兜底把 475 条全捞回来（rank 固定 999.0），
-        # 其中 310 条只挂了 topics 标签。
-        # 期望：召回等于 text/title/author 三字段并集的 165 条，且不是兜底给的。
+    def test_two_character_term_reaches_full_recall(self):
+        # 阶段 2 摘除 expectedFailure。修复前：MATCH 命中 0，全靠 LIKE 兜底把 475 条
+        # 捞回来（rank 恒 999.0），其中 310 条只挂了 topics 标签。
+        # 修复后：召回精确等于 text/title/author 三字段并集的 165 条。
+        # 等值断言同时卡住上下界——多一条说明 topics 漏进召回，少一条说明人写字段被砍。
         expected = recall_target_ids(self.connection, "竞价")
         rows = search(self.connection, "竞价", None, None, 500)
         got = {row["chunk_id"] for row in rows}
         self.assertEqual(got, expected)
         self.assertTrue(all(row["rank"] != 999.0 for row in rows))
 
-    @unittest.expectedFailure
-    def test_title_and_author_only_matches_must_be_recalled(self):
-        # 当前：两字词进不了 FTS，兜底虽然四字段 OR 能碰到这 15 条，但混在 310 条
-        # 标签噪声里，且带着候选池截断。期望：这 15 条必须在召回结果里。
+    def test_title_and_author_only_matches_are_recalled(self):
+        # 阶段 2 摘除 expectedFailure。这 15 条只在标题或作者里含词，正文不含，
+        # 所以只对 text 做 GLOB 的实现会全部丢掉——契约要求三列各自 GLOB 再取并集。
         # 真库同类块：龙头 310 条、情绪 406 条、竞价 58 条，全部来自 title。
-        # 这 15 条的数量由 test_recall_target_is_larger_than_prose_alone 那个普通测试守着，
-        # 不在这里重复断言——写在 expectedFailure 内部的守卫失败会被吞掉，等于没写。
+        # 这 15 条的数量由 test_recall_target_is_larger_than_prose_alone 那个测试守着。
         rows = search(self.connection, "竞价", None, None, 500)
         got = {row["chunk_id"] for row in rows}
         title_or_author_only = recall_target_ids(self.connection, "竞价") - prose_ids(
@@ -511,15 +589,23 @@ class ShortTermSearchTests(unittest.TestCase):
         rows = self.search("弱转强")
         self.assertTrue(all(row["rank"] != 999.0 for row in rows))
 
-    def test_mixed_query_currently_ignores_the_short_term(self):
-        # '竞价 情绪周期' silently becomes '情绪周期': the short term is dropped and the
-        # FTS branch succeeds, so no fallback ever runs to recover it.
+    def test_mixed_query_keeps_both_lengths(self):
+        # 阶段 2 前这条叫 ..._currently_ignores_the_short_term：'竞价 弱转强' 会被静默
+        # 缩成 '弱转强'。现在两个词各自召回后取并集，所以结果必须真的变大——
+        # 短词的贡献由 RetrievalContractTests 逐条核对，这里只钉住"不是兜底给的"。
         rows = self.search("竞价 弱转强")
         self.assertTrue(all(row["rank"] != 999.0 for row in rows))
+        both = search(self.connection, "竞价 弱转强", None, None, 500)
+        long_only = search(self.connection, "弱转强", None, None, 500)
+        self.assertGreater(len(both), len(long_only))
 
 
 class SourceCoverageTests(unittest.TestCase):
-    """SPEC 缺陷 C: the LIKE fallback truncates by rowid, so results skew to one source.
+    """SPEC 缺陷 C 的召回部分（阶段 2 已修）：候选池曾按 rowid 截断，结果偏向单一来源。
+
+    阶段 2 删掉了 candidate_limit，候选集先取全量再截断，所以下面这张表记的是修复前的
+    候选池构成，作为缺陷成因的存档。排序部分（正文命中要排在纯标签命中之前）归阶段 3，
+    这个类里唯一保留 expectedFailure 的用例就是那一条。
 
     Measured read-only on 2026-08-02 over the frozen regression sample, as
     fulibei/nanjinglu_bian/tulip_garden. Candidate pool = max(limit*30, 120) = 240:
@@ -535,8 +621,8 @@ class SourceCoverageTests(unittest.TestCase):
     machine-assigned and its label text never appears in the prose, so most of that count
     is noise. The recall target per SPEC 2.2 is the middle column.
 
-    Every one of these high-traffic terms returns nothing but fulibei. That is worse than
-    zero results: the answer looks plausible while the other sources are silently excluded.
+    修复前每个高频词都只返回 fulibei。那比零结果更糟：答案看起来是合理的，而其他来源
+    被静默排除了。修复后召回等于三字段并集，来源覆盖成为等值断言的推论。
 
     What is asserted here is the *pool*, not the shape of the top 8. SPEC 阶段 3 sets no
     per-source quota on results, so requiring "the 8 rows span >= 2 sources" would push
@@ -557,7 +643,9 @@ class SourceCoverageTests(unittest.TestCase):
         return search(self.connection, query, None, None, limit)
 
     def test_candidate_pool_is_truncated_by_insertion_order(self):
-        # Replays query_kb.py:54-61 verbatim: LIMIT without ORDER BY.
+        # 复刻旧实现那条 SQL（LIMIT 无 ORDER BY），作为缺陷成因的存档。
+        # 查的是 chunks 表本身，不经过 search()，所以阶段 2 删掉候选池截断后这条依然
+        # 成立——它证明的是"当年那种写法必然偏斜"，不是"今天的实现还偏斜"。
         pool = self.connection.execute(
             "SELECT source_id FROM chunks "
             "WHERE (text LIKE ? OR title LIKE ? OR author LIKE ? OR topics LIKE ?) LIMIT ?",
@@ -565,13 +653,19 @@ class SourceCoverageTests(unittest.TestCase):
         ).fetchall()
         self.assertEqual(sources_of(pool), {"fulibei": 240})
 
-    def test_default_limit_currently_returns_one_source_only(self):
-        # Records today's skew as a baseline rather than demanding a quota. Both of the
-        # assertions that used to live here — "the 8 rows span >= 2 sources" and
-        # "tulip_garden must appear in the 8" — were requirements on the top 8, which
-        # SPEC 阶段 3 explicitly does not impose. Coverage is a recall-layer property; see
-        # test_recall_layer_must_reach_every_source_that_holds_matches below.
-        self.assertEqual(set(sources_of(self.search("竞价"))), {"fulibei"})
+    def test_default_limit_no_longer_collapses_to_the_first_source(self):
+        # 阶段 2 前这条叫 ..._currently_returns_one_source_only，钉的是 {"fulibei"}：
+        # 候选池按 rowid 截满 240 条 fulibei，其余来源一条进不来。候选池已全量化，
+        # 实测前 8 条变成 tulip_garden 5 + nanjinglu_bian 3。
+        #
+        # 断言仍然不是"必须跨 N 个来源"——SPEC 阶段 3 明确不设来源配额，写配额会诱导
+        # 实现去凑。这里只要求：前 8 条不再是"rowid 最小的那个来源"独占，且每一条都
+        # 真的在三字段并集里。前者证明截断没了，后者证明没拿标签噪声来填。
+        rows = self.search("竞价")
+        self.assertNotEqual(set(sources_of(rows)), {"fulibei"})
+        self.assertTrue(
+            {row["chunk_id"] for row in rows} <= recall_target_ids(self.connection, "竞价")
+        )
 
     def fixture_holders(self) -> dict[str, int]:
         """Which fixture sources hold a three-field match for 竞价, and how many each."""
@@ -589,12 +683,11 @@ class SourceCoverageTests(unittest.TestCase):
         # test to be able to report anything.
         self.assertEqual(len(self.fixture_holders()), 3)
 
-    @unittest.expectedFailure
     def test_recall_layer_must_reach_every_source_that_holds_matches(self):
-        # 当前：兜底候选池按 rowid 截断，tulip_garden 的 95 条命中一条都进不来。
-        # 期望：大 limit 下，每个真的持有命中的来源都出现在召回里，且召回等于三字段并集。
-        # 不涉及排名，也不要求任何来源在前 8 条里出现。
-        # fixture 形状的守卫在上面的普通测试里，不放这里——会被当成预期失败吞掉。
+        # 阶段 2 摘除 expectedFailure。修复前：兜底候选池按 rowid 截断，tulip_garden 的
+        # 95 条命中一条都进不来。修复后：大 limit 下每个真的持有命中的来源都出现在召回
+        # 里，且召回等于三字段并集。不涉及排名，也不要求任何来源在前 8 条里出现。
+        # fixture 形状的守卫在上面的普通测试里，不放这里。
         expected = self.fixture_holders()
         rows = self.search("竞价", limit=500)
         self.assertTrue(all(row["rank"] != 999.0 for row in rows))
@@ -616,14 +709,16 @@ class SourceCoverageTests(unittest.TestCase):
         rows = search(self.connection, "弱转强", None, None, 500)
         self.assertEqual(sources_of(rows), {"fulibei": 20, "nanjinglu_bian": 40, "tulip_garden": 90})
 
-    @unittest.expectedFailure
-    def test_fallback_must_not_leak_label_only_matches_at_large_limits(self):
-        # 当前：limit=500 时 LIKE 兜底返回全部 475 块，其中 310 块只挂了 topics 标签，
-        # 正文、标题、作者里都没有『竞价』。期望：只返回三字段并集的 165 块。
+    def test_recall_does_not_leak_label_only_matches_at_large_limits(self):
+        # 阶段 2 摘除 expectedFailure（原名 test_fallback_must_not_leak_...，兜底已删除，
+        # 名字里的 fallback 随之去掉）。修复前：limit=500 时 LIKE 兜底返回全部 475 块，
+        # 其中 310 块只挂了 topics 标签，正文、标题、作者里都没有『竞价』。
+        # 修复后：只返回三字段并集的 165 块。
         # 165/310/475 这三个数由 test_label_only_chunks_are_disjoint_from_the_recall_target
-        # 那个普通测试守着，这里不重复写死——写在 expectedFailure 内部会被吞掉。
+        # 那个测试守着，这里不重复写死。
         rows = search(self.connection, "竞价", None, None, 500)
         self.assertEqual(len(rows), len(recall_target_ids(self.connection, "竞价")))
+        self.assertFalse({row["chunk_id"] for row in rows} & label_only_ids(self.connection, "竞价"))
 
 
 class RetrievalContractTests(unittest.TestCase):
@@ -677,23 +772,27 @@ class RetrievalContractTests(unittest.TestCase):
 
     # --- 混合与多词查询 ---
 
-    def test_mixed_length_query_uses_the_fts_branch(self):
-        # '竞价 弱转强' keeps only 弱转强 (>=3 chars), so fts_terms is non-empty and the
-        # fallback never runs. Baseline: the results are real prose matches, which must
-        # not regress when the short-term path lands.
+    def test_mixed_length_query_recalls_both_lengths(self):
+        # 阶段 2 前这条叫 ..._uses_the_fts_branch：'竞价 弱转强' 只留下 弱转强，所以
+        # 结果里每一条正文都真含其中一个词。现在短词也参与召回，而两字词的合法命中
+        # 包含"仅标题或仅作者含词"的块（fixture 里 10 + 5 条），它们的正文不含任何词。
+        # 所以口径从"正文必含"改成"三字段并集内必含"——正文口径会要求实现把标题命中
+        # 丢掉，与 SPEC 2.2 的召回字段定义直接冲突。
         rows = self.search("竞价 弱转强", limit=50)
         self.assertTrue(rows)
         self.assertTrue(all(row["rank"] != 999.0 for row in rows))
+        target = recall_target_ids(self.connection, "竞价") | recall_target_ids(
+            self.connection, "弱转强"
+        )
         for row in rows:
             with self.subTest(chunk=row["chunk_id"]):
-                self.assertTrue("竞价" in row["text"] or "弱转强" in row["text"])
+                self.assertIn(row["chunk_id"], target)
 
-    @unittest.expectedFailure
-    def test_short_term_must_contribute_in_a_mixed_length_query(self):
-        # 当前：query_kb.py:34 把两字词整个丢掉，'情绪 弱转强' 与单查 '弱转强' 返回
-        # 完全一样的结果——短词贡献为零，而且用户看不出来。
+    def test_short_term_contributes_in_a_mixed_length_query(self):
+        # 阶段 2 摘除 expectedFailure。修复前：两字词被整个丢掉，'情绪 弱转强' 与单查
+        # '弱转强' 返回完全一样的结果——短词贡献为零，而且用户看不出来。
         # fixture 里 SECOND_TERM 只在 30 个 tulip_garden 块里，且这 30 块不含 弱转强，
-        # 而 弱转强 覆盖另外 150 块，所以短词一旦生效，结果集必须比单查 弱转强 更大。
+        # 而 弱转强 覆盖另外 150 块，所以短词生效后结果集必须比单查 弱转强 更大。
         mixed = {row["chunk_id"] for row in self.search(f"{SECOND_TERM} 弱转强", limit=500)}
         long_only = {row["chunk_id"] for row in self.search("弱转强", limit=500)}
         self.assertTrue(prose_ids(self.connection, SECOND_TERM) <= mixed)
@@ -710,27 +809,40 @@ class RetrievalContractTests(unittest.TestCase):
         self.assertEqual(len(expected), 195)
         self.assertTrue(expected <= found)
 
-    @unittest.expectedFailure
-    def test_multiple_two_character_terms_must_not_return_label_only_chunks(self):
-        # 当前：limit=500 时兜底把全部 475 块返回，其中 280 块 text/title/author 三个
-        # 字段里都没有这两个词，纯靠 topics 自动标签进来（缺陷 A + 缺陷 C 的组合）。
-        # 期望：只返回三字段并集的块。
+    def test_multiple_two_character_terms_do_not_return_label_only_chunks(self):
+        # 阶段 2 摘除 expectedFailure。修复前：limit=500 时兜底把全部 475 块返回，其中
+        # 280 块 text/title/author 三个字段里都没有这两个词，纯靠 topics 自动标签进来
+        # （缺陷 A + 缺陷 C 的组合）。修复后：只返回三字段并集的块。
         target = recall_target_ids(self.connection, "竞价") | recall_target_ids(
             self.connection, SECOND_TERM
         )
         got = {row["chunk_id"] for row in self.search(f"竞价 {SECOND_TERM}", limit=500)}
         self.assertEqual(got, target)
 
-    @unittest.expectedFailure
-    def test_multiple_two_character_terms_must_both_contribute(self):
-        # 当前：默认 limit=8 时候选池 240 条全被 fulibei 的纯标签块占满，
-        # 只含『情绪』的 30 个 tulip_garden 块一条都进不来。
-        # 期望：两个词各自的命中都能进结果，且结果正文真含至少一个词。
-        rows = self.search(f"竞价 {SECOND_TERM}")
-        self.assertTrue(any(SECOND_TERM in row["text"] for row in rows))
-        for row in rows:
-            with self.subTest(chunk=row["chunk_id"]):
-                self.assertTrue("竞价" in row["text"] or SECOND_TERM in row["text"])
+    def test_multiple_two_character_terms_both_contribute(self):
+        # 阶段 2 摘除 expectedFailure。修复前：默认 limit=8 时候选池 240 条全被 fulibei
+        # 的纯标签块占满，只含『情绪』的 30 个 tulip_garden 块一条都进不来。
+        #
+        # 断言口径从 limit=8 改成大 limit，这不是放宽标准，是把它挪到该管的那一层。
+        # 原来那两条断言——"前 8 条里必须出现 SECOND_TERM"、"前 8 条正文必须含词"——
+        # 都是对前 8 条顺序的要求，而 SECOND_TERM 在 fixture 里只存在于 tulip_garden，
+        # 等于要求小 limit 结果跨来源。SPEC 2.3 把这条线划给阶段 3（阶段 2 用大 limit
+        # 查召回不看顺序），SPEC 2.2 也明确小 limit 结果不检查来源数量。
+        #
+        # 这里改查"两个词各自独有的命中都真的进了召回"：竞价独有 165 条、情绪独有
+        # 30 条、交集 0，所以任一词被丢掉都会让对应那一侧变成空集。排序那一半由
+        # SourceCoverageTests 里唯一保留的阶段 3 expectedFailure 负责。
+        rows = self.search(f"竞价 {SECOND_TERM}", limit=500)
+        got = {row["chunk_id"] for row in rows}
+        first_only = recall_target_ids(self.connection, "竞价") - recall_target_ids(
+            self.connection, SECOND_TERM
+        )
+        second_only = recall_target_ids(self.connection, SECOND_TERM) - recall_target_ids(
+            self.connection, "竞价"
+        )
+        self.assertTrue(first_only and second_only, "两个词的独有命中不能为空，否则断言空转")
+        self.assertTrue(first_only <= got)
+        self.assertTrue(second_only <= got)
 
     # --- 过滤器 ---
 
@@ -784,6 +896,127 @@ class RetrievalContractTests(unittest.TestCase):
     def test_limit_zero_and_one_are_honoured(self):
         self.assertEqual(self.search("弱转强", limit=0), [])
         self.assertEqual(len(self.search("弱转强", limit=1)), 1)
+
+
+class GlobEscapingTests(unittest.TestCase):
+    """两字词走 GLOB，所以用户输入里的 GLOB 元字符必须先转义成字面量。
+
+    转义前实测（真库 2026-08-02，召回 vs 字面子串并集）：
+    ``*`` 3362/45、``?`` 3362/614、``**`` 3362/4、``竞*`` 534/0、``A?`` 1678/0，
+    ``[`` 0/1864。前五个是把无关内容当成命中（``*`` 直接返回全库），最后一个方向相反：
+    未闭合的字符类让整个模式失效，真实命中全丢。
+
+    SQLite 的 GLOB 没有 ESCAPE 子句（那是 LIKE 才有的），反斜杠也不是转义符，唯一办法
+    是把元字符包进字符类。要转的是 ``*``、``?``、``[`` 三个；``]`` 只在紧跟 ``[`` 时特殊，
+    单独出现就是字面量，不用转。
+
+    断言写成"召回集合严格等于字面子串并集"，不是"不抛异常"：不抛异常这条在转义之前
+    就已经成立了（``*`` 老老实实返回了 3362 块），根本测不出这个缺陷。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.connection = build_glob_fixture()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.connection.close()
+
+    def test_escaping_wraps_each_metacharacter_in_a_character_class(self):
+        # 转义函数本身。顺序在这里就能看出来：`[` 必须先替换，否则先转 `*` 得到的
+        # `[*]` 里那个 `[` 会被第二遍再转一次，变成 `[[]*]`。
+        cases = {
+            "*": "[*]",
+            "?": "[?]",
+            "[": "[[]",
+            "**": "[*][*]",
+            "竞*": "竞[*]",
+            "A?": "A[?]",
+            "*?[": "[*][?][[]",  # 三个一起出现，验证顺序
+            "]": "]",            # 单独的右括号不是元字符
+            "筹码": "筹码",       # 不含元字符时原样返回
+        }
+        for raw, expected in cases.items():
+            with self.subTest(term=raw):
+                self.assertEqual(glob_literal(raw), expected)
+
+    def test_pattern_adds_wildcards_after_escaping_not_before(self):
+        # 顺序错了的话，自己加的那两个星号会被一起转掉，模式变成只匹配字面 `*x*`。
+        self.assertEqual(glob_pattern("*"), "*[*]*")
+        self.assertEqual(glob_pattern("筹码"), "*筹码*")
+
+    def test_metacharacter_terms_recall_exactly_the_literal_matches(self):
+        # 核心断言：每个元字符词的召回集合严格等于字面子串并集。
+        # 严格相等同时卡住两头——多一条是通配符还在生效，少一条是转义把模式弄坏了。
+        for term in GLOB_METACHARACTER_TERMS:
+            with self.subTest(term=term):
+                expected = literal_substring_ids(self.connection, term)
+                self.assertTrue(expected, f"fixture 里没有含 {term!r} 的块，断言会空转")
+                got = {row["chunk_id"] for row in search(self.connection, term, None, None, 500)}
+                self.assertEqual(got, expected)
+
+    def test_a_single_star_does_not_satisfy_a_double_star_query(self):
+        # 反向情形：查 `**` 不该命中只有一个星号的块。转义失效时 `**` 会匹配一切，
+        # 这条就会失败——上面那条等值断言已经覆盖，这里单独写出来是因为它最容易
+        # 被一个"看起来能过"的实现蒙过去（比如只转第一个元字符）。
+        single = {
+            row["chunk_id"]
+            for row in self.connection.execute(
+                "SELECT chunk_id FROM chunks WHERE instr(text, ?) > 0 AND instr(text, ?) = 0",
+                ("*", "**"),
+            )
+        }
+        self.assertTrue(single, "fixture 里需要一块只含单个星号的")
+        got = {row["chunk_id"] for row in search(self.connection, "**", None, None, 500)}
+        self.assertFalse(got & single)
+
+    def test_star_query_does_not_return_the_whole_table(self):
+        # 转义前 `*` 在真库返回全部 3362 块。这条把那个具体故障钉死：结果必须真的
+        # 少于全表，否则通配符还在生效。
+        total = self.connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
+        got = search(self.connection, "*", None, None, 500)
+        self.assertLess(len(got), total)
+        self.assertTrue(got, "至少有几块真的含星号，不该是空的")
+
+    def test_unclosed_bracket_still_matches_its_literal(self):
+        # `[` 的故障方向与其他几个相反：转义前整个模式失效，返回 0 条。
+        got = {row["chunk_id"] for row in search(self.connection, "[", None, None, 500)}
+        self.assertEqual(got, literal_substring_ids(self.connection, "["))
+        self.assertTrue(got, "fixture 里有含 `[` 的块，不该一条都不返回")
+
+    def test_escaping_covers_title_and_author_columns(self):
+        # 三列都要转义。只对 text 转的实现会在这两条上露出来。
+        for term, column in (("*", "title"), ("?", "author")):
+            with self.subTest(column=column):
+                expected = {
+                    row["chunk_id"]
+                    for row in self.connection.execute(
+                        f"SELECT chunk_id FROM chunks WHERE instr({column}, ?) > 0", (term,)
+                    )
+                }
+                self.assertTrue(expected)
+                got = {row["chunk_id"] for row in search(self.connection, term, None, None, 500)}
+                self.assertTrue(expected <= got)
+
+    def test_metacharacters_do_not_break_ordinary_terms(self):
+        # 转义不该影响不含元字符的查询，也不该让含元字符的块整体变得不可检索。
+        got = {row["chunk_id"] for row in search(self.connection, "竞价", None, None, 500)}
+        self.assertEqual(got, literal_substring_ids(self.connection, "竞价"))
+
+    def test_mixed_query_with_a_metacharacter_term_keeps_or_semantics(self):
+        # 元字符词与普通词混在一起时，仍是 OR，且两边都按字面口径召回。
+        got = {row["chunk_id"] for row in search(self.connection, "竞价 *", None, None, 500)}
+        expected = literal_substring_ids(self.connection, "竞价") | literal_substring_ids(
+            self.connection, "*"
+        )
+        self.assertEqual(got, expected)
+
+    def test_metacharacter_query_does_not_raise(self):
+        # 附带的健壮性检查。故意放在等值断言之后，且不单独作为验收依据——
+        # 转义之前它就已经通过了，测不出任何东西。
+        for term in (*GLOB_METACHARACTER_TERMS, "]", "[]", "[a-z]", "***", "?*[", "a**b"):
+            with self.subTest(term=term):
+                self.assertIsInstance(search(self.connection, term, None, None, 5), list)
 
 
 DATABASE = Path(__file__).resolve().parents[2] / "_知识库系统" / "indexes" / "knowledge.db"
@@ -1085,30 +1318,26 @@ class RealIndexTests(unittest.TestCase):
                 self.assertLess(union, or4)
                 self.assertEqual(or4 - union, len(self.label_only_ids(term)))
 
-    def test_large_limit_masks_the_recall_defect_but_not_the_precision_one(self):
-        # Today's baseline, in two halves.
+    def test_large_limit_recall_is_exactly_the_union_with_no_label_leak(self):
+        # 阶段 2 前这条叫 test_large_limit_masks_the_recall_defect_but_not_the_precision_one，
+        # 记录的是修复前 limit=5000 的两半现象：召回看着够（candidate_limit 变成 150000，
+        # 比表还大，兜底把所有命中都返回了），但精度不行——兜底把 topics 也 OR 进去，
+        # 只挂了自动标签的块同样返回。实测那时 rank 恒为 999.0。
         #
-        # Recall looks fine at limit=5000: candidate_limit becomes 150000, larger than the
-        # table, so the fallback returns every match. That is why the acceptance assertion
-        # also requires rank != 999.0 — coverage alone can be faked by a big limit.
-        #
-        # Precision does not look fine: the fallback ORs in the topics column, so it also
-        # returns chunks matched by the auto label alone. Those are counted here so the
-        # figure is on record rather than assumed away.
+        # 修复后两半都成立，所以断言从"漏标签块"翻成"一条标签块都不漏"，并把召回从
+        # 子集关系收紧成等值：多一条说明 topics 又漏进召回，少一条说明人写字段被砍。
         for term in ("竞价", "筹码", "龙头", "打板", "情绪"):
             with self.subTest(term=term):
                 rows = self.in_scope(search(self.connection, term, None, None, 5000))
                 got = {row["chunk_id"] for row in rows}
-                self.assertTrue(all(row["rank"] == 999.0 for row in rows))
-                self.assertTrue(self.recall_target_ids(term) <= got)
-                # Label-only chunks come back too, which is the precision half of 缺陷 A.
-                self.assertTrue(self.label_only_ids(term) & got)
+                self.assertTrue(all(row["rank"] != 999.0 for row in rows))
+                self.assertEqual(got, self.recall_target_ids(term))
+                self.assertFalse(self.label_only_ids(term) & got)
 
-    @unittest.expectedFailure
-    def test_two_character_terms_must_be_recalled_without_the_fallback(self):
-        # 当前：两字词进不了 MATCH，只能靠 LIKE 兜底（rank 恒为 999.0），
-        # 而兜底带着候选池截断和来源偏斜（缺陷 B + C）。
-        # 期望：召回等于 text/title/author 三字段并集，且不是兜底给的。
+    def test_two_character_terms_are_recalled_without_a_fallback(self):
+        # 阶段 2 摘除 expectedFailure。修复前：两字词进不了 MATCH，只能靠 LIKE 兜底
+        # （rank 恒为 999.0），而兜底带着候选池截断和来源偏斜（缺陷 B + C）。
+        # 修复后：召回等于 text/title/author 三字段并集，且不是兜底给的。
         #
         # 口径是并集而不是正文：真库里 龙头 有 310 块、情绪 有 406 块只在标题里含词，
         # 那是人写的真实标题，属于合法结果。用正文口径会要求实现把它们丢掉。
@@ -1136,14 +1365,17 @@ class RealIndexTests(unittest.TestCase):
                 self.assertTrue(rows)
                 self.assertTrue(all(term in row["text"] for row in rows))
 
-    def test_default_limit_results_come_from_the_fallback(self):
-        # Provenance for the numbers above: rank 999.0 means query_kb.py:56 produced them,
-        # so precision today is a property of relevance() over a truncated pool, and any
-        # change to either has to be re-measured rather than assumed.
+    def test_default_limit_results_no_longer_come_from_a_fallback(self):
+        # 阶段 2 前这条叫 ..._come_from_the_fallback，断言 rank 恒为 999.0，用来交代
+        # 上一条那些数字的来路。兜底已删除，999.0 这个哨兵值不再出现在任何路径上。
+        #
+        # 精度仍然是 relevance() 的属性，只是它现在跑在全量候选上而不是被截断的 240 条
+        # 上；权重本身阶段 2 一个都没动（那是阶段 3 的活）。
         for term in ("竞价", "龙头", "打板", "情绪", "筹码"):
             with self.subTest(term=term):
                 rows = search(self.connection, term, None, None, 8)
-                self.assertTrue(all(row["rank"] == 999.0 for row in rows))
+                self.assertTrue(rows)
+                self.assertTrue(all(row["rank"] != 999.0 for row in rows))
 
     def test_topic_labels_do_not_dominate_full_text_search(self):
         # 阶段 1 前：情绪周期 FTS 1823 / 正文 202，龙头与核心 1358 / 正文 0，
@@ -1203,17 +1435,23 @@ class RealIndexTests(unittest.TestCase):
             self.connection.execute("PRAGMA integrity_check").fetchone()[0], "ok"
         )
 
-    def test_current_default_limit_drops_all_but_one_sample_source(self):
-        # Today's baseline for 缺陷 C, stated as a measurement rather than a target.
-        # Within the sample all four terms return fulibei only. Unfiltered, 打板 also
-        # returns one panfeng row, which is exactly the trap that makes a "spans >= 2
-        # sources" assertion useless: it would already pass for 打板 while
-        # nanjinglu_bian and tulip_garden are both absent. Coverage is asserted at the
-        # recall layer instead, as an equality that means nothing was dropped.
+    def test_default_limit_rows_all_come_from_the_recall_target(self):
+        # 阶段 2 前这条叫 test_current_default_limit_drops_all_but_one_sample_source，
+        # 钉的是"样本内四个词都只返回 fulibei"，即缺陷 C 的实测现状。候选池全量化后
+        # 实测已变化——『竞价』的前 8 条来自 tulip_garden，『龙头』仍是 fulibei。
+        #
+        # 替换后的断言不检查来源数量，也不要求任何来源出现：那是配额，SPEC 阶段 3
+        # 明确不设，而且这里正是那个陷阱的出处——修复前『打板』不加过滤时会带回一条
+        # panfeng，"跨 >= 2 个来源"对它已经通过，而 nanjinglu_bian 和 tulip_garden
+        # 两个都不在。来源覆盖在召回层用等值断言证明。
+        #
+        # 这里只钉小 limit 的可信度：前 8 条必须条条落在三字段并集内，即截断之后也没有
+        # 拿标签噪声来填。顺序对不对归阶段 3。
         for term in ("竞价", "龙头", "打板", "情绪"):
             with self.subTest(term=term):
                 rows = self.in_scope(search(self.connection, term, None, None, 8))
-                self.assertEqual(set(sources_of(rows)), {"fulibei"})
+                self.assertTrue(rows)
+                self.assertTrue({row["chunk_id"] for row in rows} <= self.recall_target_ids(term))
 
     def sample_holders_of(self, term: str) -> dict[str, int]:
         """Which regression-sample sources hold a three-field match, and how many each."""
@@ -1236,10 +1474,10 @@ class RealIndexTests(unittest.TestCase):
                     f"{term} 在回归样本里已无任何命中，RECALL_DEFECT_TERMS 需要换一组词",
                 )
 
-    @unittest.expectedFailure
     def test_recall_layer_must_reach_every_source_that_holds_matches(self):
-        # 当前：兜底候选池按 rowid 截断，郁金香的 245 条『竞价』正文命中一条都进不来。
-        # 期望：大 limit 下每个真的持有命中的来源都出现在召回里。
+        # 阶段 2 摘除 expectedFailure。修复前：兜底候选池按 rowid 截断，郁金香的 245 条
+        # 『竞价』正文命中一条都进不来。修复后：大 limit 下每个真的持有命中的来源都出现
+        # 在召回里。
         #
         # SPEC 阶段 3 明确不设来源配额，所以这条只查召回层（大 limit），不查前 8 条。
         # 防空转的检查在上面的普通测试里——写在这个方法内部会被当成预期失败吞掉。
@@ -1264,6 +1502,32 @@ class RealIndexTests(unittest.TestCase):
         # --source must keep narrowing to one source even after the skew is fixed.
         rows = search(self.connection, "竞价", "tulip_garden", None, 8)
         self.assertEqual(sources_of(rows), {"tulip_garden": 8})
+
+    def test_glob_metacharacters_are_escaped_on_the_real_corpus(self):
+        # fixture 侧的 GlobEscapingTests 用 11 块的小库证明语义，这里在真库上复核——
+        # 转义前的故障数字全部是在这个 48M 的库上测出来的：`*` 召回 3362（= 全表）
+        # 而字面命中只有 45 块，`?` 3362 对 614，`竞*` 534 对 0，`[` 0 对 1864。
+        #
+        # 口径用 LIKE 而不是 instr：这批词里没有 LIKE 的通配符（`%`、`_`），两者等价，
+        # 而 LIKE 与 GLOB 在含 NUL 字节的块上行为一致，instr 不一致——真库里
+        # nanjinglu_bian 有 41 块正文带 NUL（原始资料里的控制字符），SQLite 的 GLOB
+        # 和 LIKE 都按 C 字符串在 NUL 处停止比较，instr 按 blob 看完整内容。用 instr
+        # 会凭空多出一条差异，那是数据污点，不是转义问题。
+        total = self.connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
+        for term in ("*", "?", "[", "**", "竞*", "A?"):
+            with self.subTest(term=term):
+                expected = {
+                    row[0]
+                    for row in self.connection.execute(
+                        "SELECT chunk_id FROM chunks WHERE text LIKE ? OR title LIKE ? OR author LIKE ?",
+                        [f"%{term}%"] * 3,
+                    )
+                }
+                got = {
+                    row["chunk_id"] for row in search(self.connection, term, None, None, total + 1)
+                }
+                self.assertEqual(got, expected)
+                self.assertLess(len(got), total, f"{term!r} 返回了全表，通配符仍在生效")
 
 
 CJK_RUN = re.compile(r"[一-鿿]+")
@@ -1560,12 +1824,12 @@ class RegistryScopedIndexTests(unittest.TestCase):
                     f"RECALL_DEFECT_TERMS 需要换一组词，否则召回缺陷的断言会空转",
                 )
 
-    @unittest.expectedFailure
     def test_recall_layer_must_reach_every_registered_source_that_holds_matches(self):
-        # 当前（2026-08-02 实测，全库口径）：两字词全部走 LIKE 兜底，rank 恒为 999.0，
-        # 召回集合和 text/title/author 并集不一致——竞价 目标 453 条，兜底返回 1620 条，
-        # 多出来的是 topics 标签命中；同时候选池按 rowid 截断，各来源比例也不对。
-        # 期望：召回等于三字段并集，且每个真的持有命中的来源都出现，不靠兜底。
+        # 阶段 2 摘除 expectedFailure。修复前（2026-08-02 实测，全库口径）：两字词全部走
+        # LIKE 兜底，rank 恒为 999.0，召回集合和 text/title/author 并集不一致——竞价
+        # 目标 453 条，兜底返回 1620 条，多出来的是 topics 标签命中；同时候选池按 rowid
+        # 截断，各来源比例也不对。
+        # 修复后：召回等于三字段并集，且每个真的持有命中的来源都出现，不靠兜底。
         #
         # 范围取 sources.yaml 全部登记来源，不是三来源回归样本：验收面向用户真实查询。
         # 但覆盖面逐词按"该词在哪些来源有命中"动态计算，绝不要求全部登记来源都出现。
@@ -1596,6 +1860,7 @@ FIXTURE_TEST_CLASSES = (
     "ShortTermSearchTests",
     "SourceCoverageTests",
     "RetrievalContractTests",
+    "GlobEscapingTests",
     "SubsetMarkerTests",
     "SourceRegistryTests",
 )
