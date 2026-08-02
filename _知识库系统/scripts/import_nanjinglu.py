@@ -29,6 +29,7 @@ from kb_import_utils import (
     subtract_known_text,
     text_layer_is_usable,
     write_jsonl,
+    write_text_lf,
 )
 
 
@@ -109,8 +110,7 @@ def load_cache(path: Path, source_hash: str, dpi: int) -> dict | None:
 
 
 def save_cache(path: Path, item: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_text_lf(path, json.dumps(item, ensure_ascii=False, indent=2) + "\n")
 
 
 def extract_pdf(
@@ -324,7 +324,7 @@ def main() -> int:
 
         normalized_text = "\n\n".join(normalized_parts).strip()
         text_path = LIB / "texts" / f"{doc_id}.txt"
-        text_path.write_text(normalized_text + ("\n" if normalized_text else ""), encoding="utf-8")
+        write_text_lf(text_path, normalized_text + ("\n" if normalized_text else ""))
         content_date = extract_date(normalized_text[:400])
         topics = infer_topics(title, normalized_text)
         risk_flags = []
@@ -380,7 +380,7 @@ def main() -> int:
     for item in chronology_rows:
         suffix = f"（重复文件，正文沿用 {item['duplicate_of']}）" if item.get("duplicate_of") else ""
         chronology.append(f"- {item.get('date') or '日期未标注'}｜{item['title']}｜{item['document_id']} {suffix}".rstrip())
-    (LIB / "chronology.md").write_text("\n".join(chronology) + "\n", encoding="utf-8")
+    write_text_lf(LIB / "chronology.md", "\n".join(chronology) + "\n")
 
     content_map = ["# 南京路彼岸内容地图", "", "| 日期 | 标题 | 主题 | 字符数 | 文档ID |", "|---|---|---|---:|---|"]
     for item in chronology_rows:
@@ -388,7 +388,7 @@ def main() -> int:
             f"| {item.get('date') or '未标注'} | {item['title'].replace('|', '｜')} | "
             f"{'、'.join(item.get('topics') or []) or '未标注'} | {item.get('characters', 0)} | {item['document_id']} |"
         )
-    (LIB / "content_map.md").write_text("\n".join(content_map) + "\n", encoding="utf-8")
+    write_text_lf(LIB / "content_map.md", "\n".join(content_map) + "\n")
 
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(), "source_id": SOURCE_ID,
@@ -397,7 +397,7 @@ def main() -> int:
         "chunks": len(chunk_rows), "characters": sum(item.get("characters", 0) for item in document_rows),
         "extraction_counts": dict(extraction_counts), "errors": errors,
     }
-    (LIB / "source_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_text_lf(LIB / "source_summary.json", json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
     quality = [
         "# 南京路彼岸导入质量报告", "", f"- 原始文件：{len(files)}", f"- 唯一内容文档：{summary['unique_documents']}",
         f"- 重复文件：{summary['duplicates']}", f"- 父块：{len(parent_rows)}", f"- 检索子块：{len(chunk_rows)}",
@@ -405,7 +405,7 @@ def main() -> int:
         f"- 已记录错误：{len(errors)}", "",
         "风险：截图页经 Windows OCR 识别，可能存在同音字、标点和小字号误差；引用已保留页码和原始路径，关键结论应回看原页。",
     ]
-    (LIB / "quality_report.md").write_text("\n".join(quality) + "\n", encoding="utf-8")
+    write_text_lf(LIB / "quality_report.md", "\n".join(quality) + "\n")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not errors else 1
 

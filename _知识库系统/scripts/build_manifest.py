@@ -11,6 +11,8 @@ from pathlib import Path
 
 import yaml
 
+from kb_import_utils import write_jsonl, write_text_lf
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEM = ROOT / "_知识库系统"
@@ -94,11 +96,7 @@ def main() -> int:
 
     removed = sorted(set(previous) - seen)
     change_counts["removed"] = len(removed)
-    MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    MANIFEST.write_text(
-        "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in current),
-        encoding="utf-8",
-    )
+    write_jsonl(MANIFEST, current)
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "project_root": str(ROOT),
@@ -107,7 +105,7 @@ def main() -> int:
         "changes": change_counts,
         "removed": [{"source_id": sid, "relative_path": rel} for sid, rel in removed],
     }
-    SUMMARY.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_text_lf(SUMMARY, json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

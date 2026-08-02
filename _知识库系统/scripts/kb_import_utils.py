@@ -13,7 +13,11 @@ import unicodedata
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
-from PIL import Image, ImageOps
+# Pillow is imported inside ocr_images(), not here. This module also holds the LF writing
+# helpers, which the report builders (build_manifest, build_cross_source, validate_kb) and
+# register_source import — none of them touch OCR. A module level ``from PIL import ...``
+# made those four unimportable on any interpreter without Pillow installed, so a pure
+# stdlib task failed on a dependency it never used.
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -177,11 +181,25 @@ def clean_title(path: Path) -> str:
     return title.strip(" .-_—") or path.stem
 
 
-def write_jsonl(path: Path, records: Iterable[dict]) -> None:
+def write_text_lf(path: Path, text: str) -> None:
+    """Write UTF-8 with LF line endings, whatever platform this runs on.
+
+    ``Path.write_text(..., encoding="utf-8")`` leaves ``newline=None``, which on Windows
+    translates every ``\\n`` to ``\\r\\n``. The generated products then carry CRLF while the
+    hand-written sources are LF, ``git diff --check`` reports the ``\\r`` as trailing
+    whitespace on every changed line, and the diffs are unreadable. Committed products are
+    text meant to be diffed, so they are pinned to LF at the point of writing — fixing it
+    after the fact would just come back on the next rebuild.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
+def write_jsonl(path: Path, records: Iterable[dict]) -> None:
+    write_text_lf(
+        path,
         "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
-        encoding="utf-8",
     )
 
 
@@ -372,7 +390,13 @@ def ocr_images(
     overlap: int = 120,
     batch_size: int = 24,
 ) -> dict[str, dict]:
-    """OCR images in persistent PowerShell batches and return text/error metadata."""
+    """OCR images in persistent PowerShell batches and return text/error metadata.
+
+    Pillow is imported here rather than at module level so that importing this module for
+    its writing helpers alone needs nothing beyond the standard library.
+    """
+    from PIL import Image, ImageOps
+
     TEMP_ROOT.mkdir(parents=True, exist_ok=True)
     results: dict[str, dict] = {}
     for batch_start in range(0, len(items), batch_size):
@@ -404,7 +428,7 @@ def ocr_images(
                     results[key] = {"text": "", "error": f"prepare_failed: {exc}", "tiles": 0}
             if manifest_rows:
                 manifest_path = work / "manifest.json"
-                manifest_path.write_text(json.dumps(manifest_rows, ensure_ascii=False), encoding="utf-8")
+                write_text_lf(manifest_path, json.dumps(manifest_rows, ensure_ascii=False))
                 command = [
                     "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                     str(BATCH_OCR_SCRIPT), "-ManifestPath", str(manifest_path), "-Language", language,

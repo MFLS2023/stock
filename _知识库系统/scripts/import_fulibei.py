@@ -10,6 +10,8 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from kb_import_utils import write_jsonl, write_text_lf
+
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / "_知识库系统" / "source_libraries" / "fulibei"
@@ -18,14 +20,6 @@ UTTERANCE_RE = re.compile(r"^\[第(\d+)页\s+(\d{2}:\d{2}(?::\d{2})?)\s+([^\]]+)
 
 def read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def write_jsonl(path: Path, records: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
-        encoding="utf-8",
-    )
 
 
 def parse_utterances(path: Path) -> list[dict]:
@@ -240,8 +234,9 @@ def main() -> int:
         "errors": import_errors,
         "first_pass_summary": summary,
     }
-    (LIB / "source_summary.json").write_text(
-        json.dumps(import_summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    write_text_lf(
+        LIB / "source_summary.json",
+        json.dumps(import_summary, ensure_ascii=False, indent=2) + "\n",
     )
     quality = [
         "# 复利杯标准化导入质量报告",
@@ -255,7 +250,7 @@ def main() -> int:
         "",
         "风险：直播转写可能包含同音字、断句和说话人识别误差；所有关键结论应回看原 PDF 上下文。",
     ]
-    (LIB / "quality_report.md").write_text("\n".join(quality) + "\n", encoding="utf-8")
+    write_text_lf(LIB / "quality_report.md", "\n".join(quality) + "\n")
     print(json.dumps(import_summary, ensure_ascii=False, indent=2))
     return 1 if import_errors else 0
 

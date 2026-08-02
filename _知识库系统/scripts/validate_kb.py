@@ -10,6 +10,8 @@ from pathlib import Path
 
 import yaml
 
+from kb_import_utils import write_text_lf
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEM = ROOT / "_知识库系统"
@@ -98,12 +100,11 @@ def main() -> int:
         "success": passed == len(results),
         "checks": results,
     }
-    JSON_REPORT.parent.mkdir(parents=True, exist_ok=True)
-    JSON_REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_text_lf(JSON_REPORT, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     lines = ["# 知识库验证报告", "", f"- 通过：{passed}/{len(results)}", f"- 总体：{'通过' if report['success'] else '未通过'}", ""]
     for item in results:
         lines.append(f"- {'✅' if item['passed'] else '❌'} {item['name']}：{item['detail']}")
-    REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_lf(REPORT, "\n".join(lines) + "\n")
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["success"] else 1
 

@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
-from pypdf import PdfReader
+
+from kb_import_utils import write_text_lf
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -64,7 +65,12 @@ def main() -> int:
     complexity_signals: list[str] = []
     pdf_pages = 0
     pdf_low_text_pages = 0
-    for path in [item for item in files if item.suffix.lower() == ".pdf"][:12]:
+    pdf_paths = [item for item in files if item.suffix.lower() == ".pdf"][:12]
+    if pdf_paths:
+        # Imported here, not at module level: a folder with no PDFs needs nothing beyond
+        # the standard library plus yaml, and the module must stay importable without pypdf.
+        from pypdf import PdfReader
+    for path in pdf_paths:
         try:
             reader = PdfReader(path)
             for page in reader.pages[:20]:
@@ -143,11 +149,11 @@ def main() -> int:
 
     config.setdefault("sources", []).append(source)
     temporary = CONFIG.with_suffix(".yaml.tmp")
-    temporary.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    write_text_lf(temporary, yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
     temporary.replace(CONFIG)
     library = LIBRARIES / source_id
     library.mkdir(parents=True, exist_ok=True)
-    (library / "source.yaml").write_text(yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    write_text_lf(library / "source.yaml", yaml.safe_dump(source, allow_unicode=True, sort_keys=False))
     report = [
         f"# {display_name} 接入检查", "", f"- 登记时间：{datetime.now(timezone.utc).isoformat()}",
         f"- 原始目录：{folder}", f"- 文件数：{len(files)}", f"- 格式：{json.dumps(dict(formats), ensure_ascii=False)}",
@@ -163,7 +169,7 @@ def main() -> int:
     ]
     if unsupported:
         report.extend(["", f"暂不支持的格式：{json.dumps(unsupported, ensure_ascii=False)}。请增加专用适配器，勿静默跳过。"])
-    (library / "onboarding_report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
+    write_text_lf(library / "onboarding_report.md", "\n".join(report) + "\n")
     print(json.dumps(preview, ensure_ascii=False, indent=2))
     return 0
 

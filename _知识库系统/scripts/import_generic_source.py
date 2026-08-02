@@ -28,6 +28,7 @@ from kb_import_utils import (
     ocr_images,
     split_text,
     write_jsonl,
+    write_text_lf,
 )
 
 
@@ -120,8 +121,7 @@ def extract_pdf(path: Path, doc_id: str, digest: str, lib: Path, force: bool, dp
         for index in range(1, len(reader.pages) + 1):
             item = page_meta[index]
             cache = lib / "page_texts" / f"{doc_id}-page-{index:03d}.json"
-            cache.parent.mkdir(parents=True, exist_ok=True)
-            cache.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
+            write_text_lf(cache, json.dumps(item, ensure_ascii=False, indent=2) + "\n")
             if item.get("text"):
                 units.append({"locator": f"第{index}页", "text": item["text"], "method": item["method"], "confidence": item["confidence"]})
     finally:
@@ -213,7 +213,7 @@ def main() -> int:
                     else:
                         raw = ocr_images([("image", path)]).get("image", {"text": "", "error": "no_result"})
                         result = {"source_hash": digest, "text": clean_text(raw.get("text", ""), ocr=True), "error": raw.get("error", "")}
-                        cache.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                        write_text_lf(cache, json.dumps(result, ensure_ascii=False, indent=2) + "\n")
                     units = [{"locator": f"图片:{path.name}", "text": result.get("text", ""), "method": "ocr", "confidence": "medium" if result.get("text") else "low"}]
                     if result.get("error"):
                         errors.append({"document_id": doc_id, "stage": "ocr", "error": result["error"]})
@@ -228,7 +228,7 @@ def main() -> int:
             expanded.extend({**unit, "text": part} for part in split_text(unit["text"], 1200))
         normalized = "\n\n".join(f"[{unit['locator']} | {unit['method']}]\n{unit['text']}" for unit in expanded)
         text_path = lib / "texts" / f"{doc_id}.txt"
-        text_path.write_text(normalized + ("\n" if normalized else ""), encoding="utf-8")
+        write_text_lf(text_path, normalized + ("\n" if normalized else ""))
         title = clean_title(path)
         date = extract_date(path.name, path.relative_to(source_root).as_posix(), normalized[:500])
         topics = infer_topics(title, normalized)
@@ -270,31 +270,31 @@ def main() -> int:
     content_map = [f"# {source['display_name']} 内容地图", "", "| 日期 | 标题 | 格式 | 主题 | 字符数 |", "|---|---|---|---|---:|"]
     for item in sorted(documents, key=lambda row: (row.get("date") or "9999", row["title"])):
         content_map.append(f"| {item.get('date') or '未标注'} | {item['title'].replace('|', '｜')} | {item['content_type']} | {'、'.join(item.get('topics') or []) or '未标注'} | {item['characters']} |")
-    (lib / "content_map.md").write_text("\n".join(content_map) + "\n", encoding="utf-8")
+    write_text_lf(lib / "content_map.md", "\n".join(content_map) + "\n")
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(), "source_id": source["id"], "physical_files": len(files),
         "supported_files": len(supported_files), "unsupported_files": [str(path) for path in unsupported],
         "documents": len(documents), "parents": len(parents), "chunks": len(chunks),
         "extraction_counts": dict(extraction_counts), "errors": errors,
     }
-    (lib / "source_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_text_lf(lib / "source_summary.json", json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
     quality = [
         f"# {source['display_name']} 导入质量报告", "", f"- 物理文件：{len(files)}", f"- 已支持：{len(supported_files)}",
         f"- 暂不支持：{len(unsupported)}", f"- 文档：{len(documents)}", f"- 检索块：{len(chunks)}",
         f"- 错误：{len(errors)}", "", "通用适配器适用于常规 MD/TXT/PDF/DOCX/图片。若存在说话人、复杂图文关系、跨图顺序或关键图表，应升级为专用适配器。",
     ]
-    (lib / "quality_report.md").write_text("\n".join(quality) + "\n", encoding="utf-8")
+    write_text_lf(lib / "quality_report.md", "\n".join(quality) + "\n")
     source_yaml = lib / "source.yaml"
     updated_source = dict(source)
     updated_source["status"] = "integrated" if not errors and not unsupported else "integrated_with_warnings"
-    source_yaml.write_text(yaml.safe_dump(updated_source, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    write_text_lf(source_yaml, yaml.safe_dump(updated_source, allow_unicode=True, sort_keys=False))
     source["status"] = updated_source["status"]
     source["last_import_summary"] = {
         "documents": len(documents), "chunks": len(chunks), "errors": len(errors),
         "unsupported": len(unsupported),
     }
     temporary_config = CONFIG.with_suffix(".yaml.tmp")
-    temporary_config.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    write_text_lf(temporary_config, yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
     temporary_config.replace(CONFIG)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not errors and not unsupported else 1

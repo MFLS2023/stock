@@ -28,6 +28,7 @@ from kb_import_utils import (
     span_locator,
     split_text,
     write_jsonl,
+    write_text_lf,
 )
 
 
@@ -81,9 +82,10 @@ def convert_doc(path: Path, source_hash: str, force: bool) -> tuple[Path | None,
     completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if completed.returncode != 0 or not target.exists():
         return None, completed.stderr.strip() or completed.stdout.strip() or "Word conversion failed"
-    sidecar.write_text(
-        json.dumps({"source_hash": source_hash, "source_path": str(path)}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    write_text_lf(
+        sidecar,
+        json.dumps({"source_hash": source_hash, "source_path": str(path)}, ensure_ascii=False, indent=2)
+        + "\n",
     )
     return target, ""
 
@@ -266,8 +268,9 @@ def cache_ocr(items: list[tuple[str, Path]], force: bool) -> tuple[dict[str, dic
                 "text": clean_text(raw.get("text", ""), ocr=True), "error": raw.get("error", ""),
                 "tiles": raw.get("tiles", 0),
             }
-            (cache_dir / f"{key_hashes[key]}.json").write_text(
-                json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8"
+            write_text_lf(
+                cache_dir / f"{key_hashes[key]}.json",
+                json.dumps(item, ensure_ascii=False, indent=2) + "\n",
             )
             results[key] = item
             if item["error"]:
@@ -402,7 +405,7 @@ def main() -> int:
             f"[{unit['locator']} | {unit.get('method', 'unknown')}]\n{unit['text']}" for unit in expanded_units
         )
         text_path = LIB / "texts" / f"{spec['doc_id']}.txt"
-        text_path.write_text(normalized_text + ("\n" if normalized_text else ""), encoding="utf-8")
+        write_text_lf(text_path, normalized_text + ("\n" if normalized_text else ""))
         path_values = [path.relative_to(SOURCE_ROOT).as_posix() for path in spec["paths"]]
         date = extract_date(spec["title"], *path_values, normalized_text[:1600])
         topics = infer_topics(spec["title"], normalized_text)
@@ -445,13 +448,13 @@ def main() -> int:
             f"| {item.get('date') or '未标注'} | {item['title'].replace('|', '｜')} | {item['content_type']} | "
             f"{'、'.join(item.get('topics') or []) or '未标注'} | {item['characters']} | {item['document_id']} |"
         )
-    (LIB / "content_map.md").write_text("\n".join(content_map) + "\n", encoding="utf-8")
+    write_text_lf(LIB / "content_map.md", "\n".join(content_map) + "\n")
     image_groups_map = ["# 郁金香花园图片分组", "", "> 图片按父文件夹、共同文件名前缀和尾部序号恢复顺序。", ""]
     for group in image_groups:
         image_groups_map.append(f"- {group['title']}：{len(group['paths'])} 张")
         for path in group["paths"]:
             image_groups_map.append(f"  - {path.relative_to(SOURCE_ROOT).as_posix()}")
-    (LIB / "image_groups.md").write_text("\n".join(image_groups_map) + "\n", encoding="utf-8")
+    write_text_lf(LIB / "image_groups.md", "\n".join(image_groups_map) + "\n")
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(), "source_id": SOURCE_ID,
         "physical_files": sum(1 for path in SOURCE_ROOT.rglob("*") if path.is_file()),
@@ -461,7 +464,7 @@ def main() -> int:
         "characters": sum(item["characters"] for item in document_rows),
         "extraction_counts": dict(extraction_counts), "errors": errors,
     }
-    (LIB / "source_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_text_lf(LIB / "source_summary.json", json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
     quality = [
         "# 郁金香花园导入质量报告", "", f"- 原始物理文件：{summary['physical_files']}",
         f"- 结构化课程/文章单元：{len(document_rows)}", f"- Word 文档：{len(word_files)}",
@@ -471,7 +474,7 @@ def main() -> int:
         f"- 提取方式：{json.dumps(dict(extraction_counts), ensure_ascii=False)}", f"- 已记录错误：{len(errors)}", "",
         "风险：图片中的小字号、分时图、盘口数字和表格结构可能被 OCR 误识别；相关块保留图片名和原始路径，关键数字必须回看原图。",
     ]
-    (LIB / "quality_report.md").write_text("\n".join(quality) + "\n", encoding="utf-8")
+    write_text_lf(LIB / "quality_report.md", "\n".join(quality) + "\n")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not errors else 1
 

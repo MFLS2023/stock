@@ -11,6 +11,8 @@ from pathlib import Path
 
 import yaml
 
+from kb_import_utils import write_text_lf
+
 
 ROOT = Path(__file__).resolve().parents[2]
 LIBRARIES = ROOT / "_知识库系统" / "source_libraries"
@@ -73,7 +75,7 @@ def main() -> int:
         counts = {source_id: len(topic_doc_ids[topic][source_id]) for source_id in source_names}
         count_cells = " | ".join(str(counts[source_id]) for source_id in source_names)
         lines.append(f"| {topic} | {count_cells} | {'；'.join(examples).replace('|', '｜')} |")
-    (OUTPUT / "topic_coverage.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_lf(OUTPUT / "topic_coverage.md", "\n".join(lines) + "\n")
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sources": source_summary,
@@ -86,7 +88,9 @@ def main() -> int:
         },
         "interpretation": "coverage_only_not_consensus",
     }
-    (OUTPUT / "source_overview.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_text_lf(
+        OUTPUT / "source_overview.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
