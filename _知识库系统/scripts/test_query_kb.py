@@ -354,12 +354,19 @@ class FixtureShapeTests(unittest.TestCase):
 
 
 class IndexPollutionTests(unittest.TestCase):
-    """SPEC 缺陷 A: the auto-generated topics column is indexed for full-text search.
+    """SPEC 缺陷 A（阶段 1 已修）：自动生成的 topics 列曾进入全文索引。
 
-    Measured on the real database (3176 chunks, 2026-08-02):
-        情绪周期    FTS 1823, prose 202  -> 89% noise
-        龙头与核心  FTS 1358, prose 0    -> 100% noise
-        竞价与盘口  FTS 1525, prose 0    -> 100% noise
+    修复前实测（回归样本 3176 块，2026-08-02）：
+        情绪周期    FTS 1823, 正文 202  -> 89% 噪声
+        龙头与核心  FTS 1358, 正文 0    -> 100% 噪声
+        竞价与盘口  FTS 1525, 正文 0    -> 100% 噪声
+
+    阶段 1 把 topics 从 ``chunks_fts`` 的列定义里移出（build_index.py:create_schema），
+    修复后同样三个词的样本命中数为 516 / 0 / 0，精确等于 text/title/author 三字段并集。
+    title 与 author 保留在索引里：那是人写的真实文本，标题独有命中是合法结果。
+
+    这些用例从 expectedFailure 转为普通断言，此后是防回归的守卫：任何把 topics 重新
+    塞回 FTS 的改动（包括只改 trigram 一条分支、漏改 unicode61 降级分支）都会在这里失败。
     """
 
     @classmethod
@@ -377,19 +384,51 @@ class IndexPollutionTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(prose, 0)
 
-    @unittest.expectedFailure
     def test_topic_label_must_not_match_full_text_search(self):
-        # 当前：475/475 命中（100% 噪声）。期望：0 命中。
+        # 修复前 475/475 命中（100% 噪声），标签文本在正文里一次都没出现过。
         self.assertEqual(fts_hits(self.connection, TOPIC_LABEL), 0)
 
-    @unittest.expectedFailure
-    def test_hits_must_converge_on_prose_matches(self):
-        # 当前：正文 0 条含标签，但标签让每个查到 topics 的词都命中 475 条。
-        # 期望：短语命中数收敛到正文真含数（标题命中可另计）。
-        prose = self.connection.execute(
-            "SELECT count(*) FROM chunks WHERE text LIKE ?", (f"%{TOPIC_LABEL}%",)
+    def test_the_fts_table_has_no_topics_column(self):
+        # 直接钉住列定义，而不是只看命中数。命中数为 0 也可能是别的原因造成的
+        # （比如整张表建错了），查一次 topics MATCH 能把"列还在但恰好没命中"区分出来。
+        with self.assertRaises(sqlite3.OperationalError):
+            self.connection.execute(
+                "SELECT count(*) FROM chunks_fts WHERE topics MATCH ?", ["x"]
+            )
+        sql = self.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name='chunks_fts'"
         ).fetchone()[0]
-        self.assertEqual(fts_hits(self.connection, TOPIC_LABEL), prose)
+        self.assertNotIn("topics", sql)
+        # 另外三列必须还在——把 topics 连着 title/author 一起删掉不是修复，是砍功能。
+        for column in ("title", "author", "text"):
+            with self.subTest(column=column):
+                self.assertIn(column, sql)
+
+    def test_topics_stays_readable_on_the_chunks_table(self):
+        # 移出 FTS 不等于删数据：topics 仍要能被读出来，元数据展示（query_kb.py 的
+        # "主题:" 一行）和 relevance() 都依赖它。
+        value = self.connection.execute(
+            "SELECT topics FROM chunks WHERE topics != '' LIMIT 1"
+        ).fetchone()
+        self.assertIsNotNone(value)
+        self.assertEqual(value[0], TOPIC_LABEL)
+
+    def test_hits_converge_on_the_recall_target(self):
+        # 收敛口径是 text/title/author 三字段并集，不是正文单列。正文口径与本节末句
+        # "title 保留"直接冲突：真库里 情绪周期 有 314 块只在标题含词，要求收敛到正文
+        # 202 就等于要求把标题列也移出 FTS。实测去掉 topics 后，样本命中 516 = 并集 516。
+        #
+        # fixture 里标签词的三字段并集为 0（标签文本不出现在任何人写字段里），所以这里
+        # 同时验证了标签命中归零；TITLE_WITH_TERM 反向验证标题独有命中仍被算进来。
+        #
+        # 三个词都至少三字：两字词的 MATCH 恒为 0（trigram 建不出 gram），拿它比并集
+        # 测的不是阶段 1 的收敛，而是阶段 2 才修的缺陷 B。
+        for term in (TOPIC_LABEL, "弱转强", TITLE_WITH_TERM):
+            with self.subTest(term=term):
+                self.assertEqual(
+                    fts_hits(self.connection, term),
+                    len(recall_target_ids(self.connection, term)),
+                )
 
     def test_prose_term_stays_accurate(self):
         # A three-character term already works and must not regress after the fix.
@@ -1106,16 +1145,63 @@ class RealIndexTests(unittest.TestCase):
                 rows = search(self.connection, term, None, None, 8)
                 self.assertTrue(all(row["rank"] == 999.0 for row in rows))
 
-    @unittest.expectedFailure
-    def test_topic_labels_must_not_dominate_full_text_search(self):
-        # 当前：情绪周期 FTS 1823 / 正文 202，龙头与核心 1358 / 正文 0，
-        # 竞价与盘口 1525 / 正文 0。期望：命中数不超过 text/title/author 并集。
-        # 数字取回归样本范围内——全库口径下 情绪周期 是 1850，多算了样本外来源的 27 条。
+    def test_topic_labels_do_not_dominate_full_text_search(self):
+        # 阶段 1 前：情绪周期 FTS 1823 / 正文 202，龙头与核心 1358 / 正文 0，
+        # 竞价与盘口 1525 / 正文 0。阶段 1 后实测 516 / 0 / 0。
+        # 数字取回归样本范围内——全库口径下 情绪周期 修复前是 1850，多算了样本外来源的 27 条。
         for term in ("情绪周期", "龙头与核心", "竞价与盘口"):
             with self.subTest(term=term):
                 self.assertLessEqual(
                     self.scoped_fts_hits(term), len(self.recall_target_ids(term))
                 )
+
+    def test_phase_one_acceptance_hit_counts(self):
+        # SPEC 3.1 阶段 1 验收表，逐项钉死在真库上。收敛口径是三字段并集而不是正文单列：
+        # 同节末句要求 title/author 保留在 FTS 中，而 情绪周期 有 314 块只在标题含词，
+        # 两条不能同时成立。阶段 2 的表格（正文 202 + 标题作者独有 314 = 并集 516）和本
+        # 阶段对应的旧 expectedFailure（断言"不超过并集"）都指向并集口径。
+        #
+        # 断言写成"等于并集"而不是写死 516：并集本身由 test_prose_match_baselines_hold
+        # 和 test_recall_target_exceeds_prose_for_high_traffic_terms 钉住，这里要证明的是
+        # FTS 命中与并集严格相等——多一条说明 topics 漏进来了，少一条说明人写字段被砍了。
+        expected = {"情绪周期": 516, "龙头与核心": 0, "弱转强": 111, "筹码断层": 52}
+        for term, count in expected.items():
+            with self.subTest(term=term):
+                union = len(self.recall_target_ids(term))
+                self.assertEqual(union, count)
+                self.assertEqual(self.scoped_fts_hits(term), count)
+
+    def test_the_real_fts_table_has_no_topics_column(self):
+        # 与 fixture 侧同名断言配对：fixture 走 create_schema() 的内存路径，这里查的是
+        # build_index.py 真跑一遍落盘的结果，两者可能不一致（比如库没重建）。
+        with self.assertRaises(sqlite3.OperationalError):
+            self.connection.execute(
+                "SELECT count(*) FROM chunks_fts WHERE topics MATCH ?", ["x"]
+            )
+        sql = self.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name='chunks_fts'"
+        ).fetchone()[0]
+        self.assertNotIn("topics", sql)
+        for column in ("title", "author", "text"):
+            with self.subTest(column=column):
+                self.assertIn(column, sql)
+
+    def test_topics_survives_on_the_chunks_table(self):
+        # 阶段 1 只动 FTS 的可匹配列，不动数据。topics 仍要有值：relevance() 读它，
+        # 检索结果的"主题:"一行也显示它。
+        filled = self.connection.execute(
+            f"SELECT count(*) FROM chunks WHERE source_id IN ({SAMPLE_PLACEHOLDERS}) "
+            f"AND topics != ''",
+            REGRESSION_SAMPLE,
+        ).fetchone()[0]
+        self.assertEqual(filled, 3176)
+
+    def test_integrity_check_passes(self):
+        # SPEC 3.1 阶段 1 验收表最后两行之一。重建索引本身会跑一次，但那是构建期的库；
+        # 这里查的是落盘后被测试真正读到的这一个文件。
+        self.assertEqual(
+            self.connection.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+        )
 
     def test_current_default_limit_drops_all_but_one_sample_source(self):
         # Today's baseline for 缺陷 C, stated as a measurement rather than a target.

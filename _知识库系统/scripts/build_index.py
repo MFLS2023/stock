@@ -84,14 +84,26 @@ def create_schema(connection: sqlite3.Connection) -> str:
         CREATE INDEX idx_chunks_document ON chunks(document_id);
         """
     )
+    # topics 不进 FTS：它由 infer_topics() 按关键词计数自动打，每块 5-6 个，标签文本
+    # 本身从不出现在正文里。实测（3176 块回归样本）标签命中量级压过正文命中——情绪周期
+    # FTS 1823 / 正文 202（89% 噪声）、龙头与核心 1358 / 正文 0（100% 噪声），bm25 于是
+    # 在噪声上排序。移出后全列 MATCH 精确收敛到 text/title/author 三字段并集。
+    #
+    # title 和 author 保留：那是人写的真实文本，不是自动标签，标题独有命中是合法结果
+    # （实测样本：龙头 310 块、情绪 406 块只有标题含词）。topics 仍存在 chunks 表里，
+    # 元数据展示和 relevance() 照旧可读，只是不再参与全文匹配。
+    #
+    # 两条分支的列定义必须一致：trigram 不可用时会静默降级到 unicode61，只改一条分支
+    # 会让降级路径继续被污染（SPEC 4.1 风险 3）。
+    columns = "chunk_id UNINDEXED, title, author, text"
     try:
         connection.execute(
-            "CREATE VIRTUAL TABLE chunks_fts USING fts5(chunk_id UNINDEXED, title, author, topics, text, tokenize='trigram')"
+            f"CREATE VIRTUAL TABLE chunks_fts USING fts5({columns}, tokenize='trigram')"
         )
         return "trigram"
     except sqlite3.OperationalError:
         connection.execute(
-            "CREATE VIRTUAL TABLE chunks_fts USING fts5(chunk_id UNINDEXED, title, author, topics, text, tokenize='unicode61')"
+            f"CREATE VIRTUAL TABLE chunks_fts USING fts5({columns}, tokenize='unicode61')"
         )
         return "unicode61"
 
@@ -119,9 +131,10 @@ def add_chunk(connection: sqlite3.Connection, item: dict) -> None:
     connection.execute(
         "INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", row
     )
+    # row[10] 是 topics，故意不写进 FTS——见 create_schema 的说明。
     connection.execute(
-        "INSERT INTO chunks_fts(chunk_id,title,author,topics,text) VALUES (?,?,?,?,?)",
-        (row[0], row[6], row[8], row[10], row[14]),
+        "INSERT INTO chunks_fts(chunk_id,title,author,text) VALUES (?,?,?,?)",
+        (row[0], row[6], row[8], row[14]),
     )
 
 

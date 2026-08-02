@@ -334,14 +334,60 @@ echo "退出码=$?"
 `unittest` 遇到 `unexpected success` 时**退出码是 1**，不是"全绿"。已实测确认。
 因此：
 
-1. 阶段 N 的实现与"删除该阶段对应的 `expectedFailure` 装饰器"必须在**同一个提交**内完成
-2. 删除后重跑，要求普通 PASS——输出里不得出现 `expected failures`、
-   `unexpected successes` 或 `skipped` 中的任何一项
-3. 每阶段的验收报告必须贴出 `Ran N tests ... OK` 那两行、退出码，以及 N 的分文件组成
+1. **已完成阶段**的实现与"删除该阶段对应的 `expectedFailure` 装饰器"必须在
+   **同一个提交**内完成。装饰器留着不删，修复一落地就变成 `unexpected success`，
+   退出码 1，红灯
+2. **尚未实施的后续阶段允许继续保留 `expectedFailure`。** 那些标记描述的是本轮后续
+   阶段才动手的缺陷，此刻失败正是它们该有的状态，不是本阶段的遗留问题
+3. 输出里**不得出现 `unexpected successes` 或 `skipped`**。这两项各自对应一个真实
+   故障：前者是"修好了但标记没摘"，后者是"这批断言根本没跑"（索引缺失时
+   `KB_REQUIRE_REAL_INDEX=1` 把静默 skip 变成硬失败，见 3.2 节表格）
+4. 剩余的 `expected failures` **必须全部属于后续阶段**。每阶段的验收报告要报出
+   剩余数量和阶段归属，逐项对得上号——只报总数不算，混进一条本阶段该修的
+   就是验收不通过
+5. **阶段 3 完成后 `expected failures` 才必须归零。** 在那之前的每一阶段，
+   非零是允许的中间状态，前提是第 4 条能逐项交代清楚
+6. 每阶段的验收报告必须贴出 `Ran N tests ... OK` 那两行、退出码，以及 N 的分文件组成
    （见 3.2 节末）
 
-**允许的中间状态**：只有阶段 0 提交允许存在 `expectedFailure`。
-阶段 1-3 的每个提交结束时，该阶段的标记必须已经删干净。
+**各阶段允许剩余的标记数**
+
+| 阶段完成时 | 允许剩余 | 归属 |
+|-----------|---------|------|
+| 阶段 0 | 15 | 阶段 1/2/3 各自的缺陷 |
+| **阶段 1** | **12（fixture 9 + 真库 3）** | **全部属于阶段 2/3** |
+| 阶段 2 | 待阶段 2 验收时据实报出 | 全部属于阶段 3 |
+| 阶段 3 | **0** | — |
+
+阶段 1 剩余 12 项的逐项归属（2026-08-02 实测，`grep -c` 计数 12，与运行输出的
+`expected failures=12` 一致）：
+
+| # | 用例 | 所属类 | 子集 | 阶段 |
+|---|------|-------|-----|------|
+| 1 | `test_two_character_term_must_not_need_the_fallback` | ShortTermSearchTests | fixture | 2 |
+| 2 | `test_two_character_term_must_reach_full_recall_without_the_fallback` | ShortTermSearchTests | fixture | 2 |
+| 3 | `test_title_and_author_only_matches_must_be_recalled` | ShortTermSearchTests | fixture | 2 |
+| 4 | `test_recall_layer_must_reach_every_source_that_holds_matches` | SourceCoverageTests | fixture | 2 |
+| 5 | `test_fallback_must_not_leak_label_only_matches_at_large_limits` | SourceCoverageTests | fixture | 2 |
+| 6 | `test_prose_matches_must_outrank_label_only_matches` | SourceCoverageTests | fixture | **3** |
+| 7 | `test_short_term_must_contribute_in_a_mixed_length_query` | RetrievalContractTests | fixture | 2 |
+| 8 | `test_multiple_two_character_terms_must_not_return_label_only_chunks` | RetrievalContractTests | fixture | 2 |
+| 9 | `test_multiple_two_character_terms_must_both_contribute` | RetrievalContractTests | fixture | 2 |
+| 10 | `test_two_character_terms_must_be_recalled_without_the_fallback` | RealIndexTests | 真库 | 2 |
+| 11 | `test_recall_layer_must_reach_every_source_that_holds_matches` | RealIndexTests | 真库 | 2 |
+| 12 | `test_recall_layer_must_reach_every_registered_source_that_holds_matches` | RegistryScopedIndexTests | 真库 | 2 |
+
+11 项是召回与兜底（缺陷 B、C 的召回部分，阶段 2）；第 6 项是排序权重
+（`relevance()` 给 topics 4.0 高于正文 1.0，缺陷 C 的排序部分，阶段 3）。
+第 4 项与第 11 项同名但不同类：一个跑 fixture、一个跑真库，`-k` 分两个子集各跑一次。
+
+阶段 1 摘除的三项（实现同提交）：
+`IndexPollutionTests.test_topic_label_must_not_match_full_text_search`、
+`IndexPollutionTests.test_hits_must_converge_on_prose_matches`（改名为
+`test_hits_converge_on_the_recall_target`，口径改为三字段并集）、
+`RealIndexTests.test_topic_labels_must_not_dominate_full_text_search`（改名为
+`test_topic_labels_do_not_dominate_full_text_search`）。三项已转为普通断言，
+连同新增的 6 条守卫一起防止 topics 被塞回 FTS。
 
 ### 3.1 各阶段验收
 
@@ -360,18 +406,33 @@ echo "退出码=$?"
 
 #### 阶段 1：FTS 去污染
 
-| 检查项 | 通过标准 |
-|-------|---------|
-| `情绪周期` FTS 命中 | 1823 → 202 ± 5（收敛到正文真含数） |
-| `龙头与核心` FTS 命中 | 1358 → 0（该词正文里根本不存在） |
-| `弱转强` FTS 命中 | 111 → 87 ± 31（正文 87 + 标题 31，标题命中保留） |
-| `筹码断层` FTS 命中 | 52 保持不变 |
-| 回归样本块数 | 1470 / 525 / 1181 不变 |
-| 登记表与索引一致 | `sources.yaml` 的 id 集合 = 索引里 `DISTINCT source_id` |
-| `PRAGMA integrity_check` | ok |
-| `metadata.fts_tokenizer` | 仍为 `trigram` |
+| 检查项 | 通过标准 | 实测（2026-08-02 阶段 1 完成后） |
+|-------|---------|------------------|
+| `情绪周期` FTS 命中 | 1823 → 516（收敛到三字段并集） | 516 ✅ |
+| `龙头与核心` FTS 命中 | 1358 → 0（该词三字段里根本不存在） | 0 ✅ |
+| `弱转强` FTS 命中 | 111 保持不变（正文 87 + 标题 24，标题命中保留） | 111 ✅ |
+| `筹码断层` FTS 命中 | 52 保持不变 | 52 ✅ |
+| 回归样本块数 | 1470 / 525 / 1181 不变 | 一致 ✅ |
+| 登记表与索引一致 | `sources.yaml` 的 id 集合 = 索引里 `DISTINCT source_id` | 4 个来源一致 ✅ |
+| `PRAGMA integrity_check` | ok | ok ✅ |
+| `metadata.fts_tokenizer` | 仍为 `trigram` | trigram ✅ |
 
 标题（`title`）和作者（`author`）列**保留**在 FTS 中——那是人写的真实文本，不是自动标签。
+
+**收敛口径是 `text`/`title`/`author` 三字段并集，不是正文单列。** 初版这一行写的是
+"`情绪周期` → 202 ± 5（收敛到正文真含数）"，与紧接的上一句自相矛盾：真库里
+`情绪周期` 有 314 块是标题含词、正文不含，要收敛到 202 就必须把 `title` 一起移出
+FTS，而那正是本节禁止的。同表 `弱转强` 那一行（"正文 87 + 标题保留"）用的已经是
+并集口径，两行口径不一致。阶段 2 的表格（正文 202 + 标题作者独有 314 = 并集 516，
+"召回不低于 516"）和阶段 1 对应的 `expectedFailure`（断言"命中数不超过三字段并集"）
+同样指向并集，所以按并集口径改正，并把实测值直接写进表里。
+
+`弱转强` 的标题独有命中实测是 24 条（87 + 24 = 111），初版写的 31 是
+`FTS title 列 MATCH` 数，那个口径与正文有 7 条重叠，不能相加。总数 111 两种算法一致。
+
+移出 FTS 不等于删数据：`topics` 仍在 `chunks` 表里（样本 3176 块全部有值），
+检索结果的"主题:"一行和 `relevance()` 照旧读它，只是不再参与全文匹配。
+`chunks_fts` 行数不变（3362），变的只是列定义。
 
 #### 阶段 2：召回
 
