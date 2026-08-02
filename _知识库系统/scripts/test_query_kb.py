@@ -1256,7 +1256,12 @@ class RealIndexTests(unittest.TestCase):
 
     def test_prose_match_baselines_hold(self):
         # The denominators every SPEC acceptance threshold is expressed against.
-        for term, expected in [("竞价", 394), ("筹码", 367), ("龙头", 615), ("打板", 186), ("情绪", 888)]:
+        #
+        # 龙头 615→616 和 情绪 888→889 是数据清洁提交带来的：clean_text 现在删掉 NUL
+        # 字节，原先被 NUL 截断的正文重新可见，所以 prose_matches 用的 GLOB 能看到它们了。
+        # 这两条不是阈值放宽，是分母变准——之前那两块的正文里确实写着这个词，只是
+        # SQLite 按 C 字符串在 NUL 处停止比较，检索层看不到。
+        for term, expected in [("竞价", 394), ("筹码", 367), ("龙头", 616), ("打板", 186), ("情绪", 889)]:
             with self.subTest(term=term):
                 self.assertEqual(self.prose_matches(term), expected)
 
@@ -1286,7 +1291,7 @@ class RealIndexTests(unittest.TestCase):
 
     def test_glob_covers_title_and_author_columns_too(self):
         # SPEC 2.2 recalls text/title/author. The title column carries a large share of
-        # legitimate hits — 310 chunks for 龙头, 406 for 情绪 — so GLOB has to work there
+        # legitimate hits — 310 chunks for 龙头, 405 for 情绪 — so GLOB has to work there
         # as well, otherwise stage 2 would have to drop them.
         for term in ("竞价", "龙头", "情绪"):
             with self.subTest(term=term):
@@ -1297,7 +1302,11 @@ class RealIndexTests(unittest.TestCase):
     def test_recall_target_exceeds_prose_for_high_traffic_terms(self):
         # Pins the reason the acceptance threshold is the three-field union: measuring
         # against prose alone would require the fix to DISCARD these title-only chunks.
-        for term, extra in [("竞价", 58), ("筹码", 48), ("龙头", 310), ("情绪", 406)]:
+        #
+        # 情绪 406→405：数据清洁后有一块的正文不再被 NUL 截断，它从"仅标题含词"变成
+        # "正文也含词"，于是标题独有数少 1。并集本身没变（1294），只是归属换了一栏。
+        # 龙头的 310 不变——它那一块清洁前后都是正文含词。
+        for term, extra in [("竞价", 58), ("筹码", 48), ("龙头", 310), ("情绪", 405)]:
             with self.subTest(term=term):
                 self.assertEqual(
                     len(self.recall_target_ids(term)) - self.prose_matches(term), extra
@@ -1508,19 +1517,21 @@ class RealIndexTests(unittest.TestCase):
         # 转义前的故障数字全部是在这个 48M 的库上测出来的：`*` 召回 3362（= 全表）
         # 而字面命中只有 45 块，`?` 3362 对 614，`竞*` 534 对 0，`[` 0 对 1864。
         #
-        # 口径用 LIKE 而不是 instr：这批词里没有 LIKE 的通配符（`%`、`_`），两者等价，
-        # 而 LIKE 与 GLOB 在含 NUL 字节的块上行为一致，instr 不一致——真库里
-        # nanjinglu_bian 有 41 块正文带 NUL（原始资料里的控制字符），SQLite 的 GLOB
-        # 和 LIKE 都按 C 字符串在 NUL 处停止比较，instr 按 blob 看完整内容。用 instr
-        # 会凭空多出一条差异，那是数据污点，不是转义问题。
+        # 口径用 instr，与 fixture 侧的 literal_substring_ids 完全一致：instr 是纯子串
+        # 查找，没有元字符概念，正是转义之后应该等价于的语义。曾经这里退让成 LIKE，
+        # 因为真库有 41 块正文带 NUL 字节，GLOB 和 LIKE 都按 C 字符串在 NUL 处停止
+        # 比较、instr 按 blob 看完整内容，于是 instr 口径下多出一条差异。那条差异是
+        # 真实的召回遗漏（NUL 后的正文永远搜不到），LIKE 只是把它一起藏了起来。NUL
+        # 现在由 clean_text 在导入时删除，两个口径重新一致，所以基准回到 instr。
         total = self.connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
         for term in ("*", "?", "[", "**", "竞*", "A?"):
             with self.subTest(term=term):
                 expected = {
                     row[0]
                     for row in self.connection.execute(
-                        "SELECT chunk_id FROM chunks WHERE text LIKE ? OR title LIKE ? OR author LIKE ?",
-                        [f"%{term}%"] * 3,
+                        "SELECT chunk_id FROM chunks "
+                        "WHERE instr(text, ?) > 0 OR instr(title, ?) > 0 OR instr(author, ?) > 0",
+                        [term] * 3,
                     )
                 }
                 got = {
@@ -1528,6 +1539,51 @@ class RealIndexTests(unittest.TestCase):
                 }
                 self.assertEqual(got, expected)
                 self.assertLess(len(got), total, f"{term!r} 返回了全表，通配符仍在生效")
+
+    def test_the_real_index_carries_no_nul_bytes(self):
+        """NUL 硬断言：一个 NUL 会让它后面的正文对 GLOB 和 LIKE 永久不可见。
+
+        两者都按 C 字符串语义比较，遇到第一个 NUL 就停止，所以这不是排序或权重能
+        补救的问题——带 NUL 的块在检索层根本不存在。实测 nanjinglu_bian 曾有 41 块
+        正文带 NUL，其中 nanjinglu-92154afd0e2c-p008-c05 的 NUL 在第 5 个字符、
+        "龙头"在第 42 个字符，这块因此搜不到，龙头的真实召回少了 1 条。
+        """
+        for table, columns in (
+            ("chunks", ("text", "title", "author", "topics")),
+            ("parents", ("text", "title", "author")),
+            ("chunks_fts", ("text", "title", "author")),
+        ):
+            for column in columns:
+                with self.subTest(table=table, column=column):
+                    count = self.connection.execute(
+                        f"SELECT count(*) FROM {table} WHERE instr({column}, char(0)) > 0"
+                    ).fetchone()[0]
+                    self.assertEqual(count, 0, f"{table}.{column} 有 {count} 行含 NUL")
+
+    def test_glob_and_instr_agree_on_the_whole_corpus(self):
+        # NUL 是 GLOB/LIKE 与 instr 唯一的分歧来源，所以两个口径在验收词上逐一相等，
+        # 等价于"没有任何一块的正文被 NUL 截断"。上一条按列查 NUL，这条按检索结果
+        # 查后果：即便将来有新的 C 字符串陷阱，这里也会先失败。
+        for term in ("竞价", "筹码", "龙头", "打板", "情绪", "弱转强", "情绪周期", "筹码断层"):
+            with self.subTest(term=term):
+                by_instr = {
+                    row[0]
+                    for row in self.connection.execute(
+                        "SELECT chunk_id FROM chunks "
+                        "WHERE instr(text, ?) > 0 OR instr(title, ?) > 0 OR instr(author, ?) > 0",
+                        [term] * 3,
+                    )
+                }
+                by_like = {
+                    row[0]
+                    for row in self.connection.execute(
+                        "SELECT chunk_id FROM chunks "
+                        "WHERE text LIKE ? OR title LIKE ? OR author LIKE ?",
+                        [f"%{term}%"] * 3,
+                    )
+                }
+                self.assertTrue(by_instr)
+                self.assertEqual(by_instr, by_like)
 
 
 CJK_RUN = re.compile(r"[一-鿿]+")

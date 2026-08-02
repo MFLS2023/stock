@@ -52,6 +52,12 @@ def clean_text(text: str, *, ocr: bool = False) -> str:
     """Normalize extracted text while preserving useful paragraph boundaries."""
     text = unicodedata.normalize("NFKC", text or "")
     text = text.replace("\ufeff", "").replace("\u200b", "").replace("\ufffd", "")
+    # SQLite compares GLOB and LIKE with C-string semantics and stops at the first NUL,
+    # so one stray NUL hides every character after it in that chunk from retrieval:
+    # nanjinglu-92154afd0e2c-p008-c05 carried a NUL at character 5 and its search term at
+    # character 44, which made the chunk unfindable. NUL is never meaningful prose here --
+    # it arrives only inside the byte soup a broken PDF font extracts from a damaged layer.
+    text = text.replace("\x00", "")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     if ocr:
         # Windows OCR often inserts spaces between every Chinese character.

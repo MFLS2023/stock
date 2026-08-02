@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T01:09:56.956508+00:00",
+  "generated_at": "2026-08-02T11:19:43.570414+00:00",
   "source_id": "nanjinglu_bian",
   "files": 42,
   "documents": 42,
@@ -7,7 +7,7 @@
   "duplicates": 1,
   "parents": 80,
   "chunks": 525,
-  "characters": 204423,
+  "characters": 203772,
   "extraction_counts": {
     "embedded": 232,
     "ocr_screenshot": 179,

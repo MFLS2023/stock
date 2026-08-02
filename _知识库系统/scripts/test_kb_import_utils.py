@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from kb_import_utils import (
     cjk_ratio,
+    clean_text,
     merge_short_units,
     span_locator,
     subtract_known_text,
@@ -186,6 +187,52 @@ class TextLayerQualityTests(unittest.TestCase):
         page = "这是一段正常的中文正文内容。" * 28  # ~392 chars
         self.assertFalse(text_layer_is_usable(page, min_chars=500))
         self.assertTrue(text_layer_is_usable(page, min_chars=50))
+
+
+class CleanTextNulTests(unittest.TestCase):
+    """A NUL anywhere in a chunk hides the rest of it from SQLite GLOB and LIKE.
+
+    Both compare with C-string semantics and stop at the first NUL byte, so a chunk
+    whose prose sits past one is unreachable no matter how the query is written —
+    the retrieval layer cannot fix this, only the import layer can. The measured
+    case: ``nanjinglu-92154afd0e2c-p008-c05`` carried a NUL at character 5 and its
+    龙头 at character 44, which made the whole chunk invisible to 龙头.
+    """
+
+    # Real sample: a broken embedded font extracts as NUL-separated byte soup, and the
+    # page's actual prose follows it.
+    GARBLED_THEN_PROSE = "_|\\笉颫\x17{y\x00+\x00V\x00\n\x00c\x00x\x00b\x00\n龙头是在高位的"
+
+    def test_removes_nul(self):
+        self.assertEqual(clean_text("king \x00 来自浙江"), "king 来自浙江")
+
+    def test_removes_every_nul_not_just_the_first(self):
+        self.assertNotIn("\x00", clean_text("a\x00b\x00c\x00d"))
+        self.assertEqual(clean_text("a\x00b\x00c\x00d"), "abcd")
+
+    def test_prose_after_a_nul_survives(self):
+        cleaned = clean_text(self.GARBLED_THEN_PROSE)
+        self.assertNotIn("\x00", cleaned)
+        self.assertIn("龙头是在高位的", cleaned)
+
+    def test_nul_is_removed_on_the_ocr_path_too(self):
+        # ocr=True takes a different branch through the CJK space collapsing, so it
+        # needs its own case rather than trusting the shared tail.
+        self.assertNotIn("\x00", clean_text("龙 头\x00复 盘", ocr=True))
+        self.assertEqual(clean_text("龙 头\x00复 盘", ocr=True), "龙头复盘")
+
+    def test_nul_only_input_collapses_to_empty(self):
+        self.assertEqual(clean_text("\x00"), "")
+        self.assertEqual(clean_text("\x00\x00\x00"), "")
+
+    def test_nul_does_not_glue_words_across_a_line_break(self):
+        # Deleting the NUL must not swallow the newline beside it, or two paragraphs
+        # would merge into one sentence.
+        self.assertEqual(clean_text("第一段\x00\n第二段"), "第一段\n第二段")
+
+    def test_ordinary_text_is_unchanged(self):
+        prose = "竞价是情绪的第一个观察点。\n\n龙头才是主线。"
+        self.assertEqual(clean_text(prose), prose)
 
 
 class SubtractKnownTextTests(unittest.TestCase):
