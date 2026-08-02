@@ -1,0 +1,203 @@
+{
+  "generated_at": "2026-08-01T11:26:08.767181+00:00",
+  "sources": {
+    "fulibei": {
+      "source_name": "复利杯",
+      "documents": 110,
+      "chunks": 1444,
+      "date_start": "2020-04-22",
+      "date_end": "2026-02-21"
+    },
+    "nanjinglu_bian": {
+      "source_name": "南京路彼岸",
+      "documents": 42,
+      "chunks": 343,
+      "date_start": "2025-06-18",
+      "date_end": "2026-06-28"
+    },
+    "tulip_garden": {
+      "source_name": "郁金香花园",
+      "documents": 42,
+      "chunks": 6393,
+      "date_start": "2022-09-21",
+      "date_end": "2026-01-18"
+    }
+  },
+  "topics": {
+    "题材与板块": {
+      "document_counts": {
+        "fulibei": 72,
+        "nanjinglu_bian": 27,
+        "tulip_garden": 25
+      },
+      "chunk_counts": {
+        "fulibei": 989,
+        "nanjinglu_bian": 266,
+        "tulip_garden": 3026
+      }
+    },
+    "情绪周期": {
+      "document_counts": {
+        "fulibei": 51,
+        "nanjinglu_bian": 30,
+        "tulip_garden": 30
+      },
+      "chunk_counts": {
+        "fulibei": 717,
+        "nanjinglu_bian": 302,
+        "tulip_garden": 4959
+      }
+    },
+    "心态与系统": {
+      "document_counts": {
+        "fulibei": 68,
+        "nanjinglu_bian": 15,
+        "tulip_garden": 23
+      },
+      "chunk_counts": {
+        "fulibei": 943,
+        "nanjinglu_bian": 132,
+        "tulip_garden": 4465
+      }
+    },
+    "趋势与容量": {
+      "document_counts": {
+        "fulibei": 40,
+        "nanjinglu_bian": 32,
+        "tulip_garden": 16
+      },
+      "chunk_counts": {
+        "fulibei": 457,
+        "nanjinglu_bian": 284,
+        "tulip_garden": 3627
+      }
+    },
+    "龙头与核心": {
+      "document_counts": {
+        "fulibei": 49,
+        "nanjinglu_bian": 27,
+        "tulip_garden": 9
+      },
+      "chunk_counts": {
+        "fulibei": 797,
+        "nanjinglu_bian": 250,
+        "tulip_garden": 214
+      }
+    },
+    "仓位与回撤": {
+      "document_counts": {
+        "fulibei": 66,
+        "nanjinglu_bian": 7,
+        "tulip_garden": 8
+      },
+      "chunk_counts": {
+        "fulibei": 910,
+        "nanjinglu_bian": 27,
+        "tulip_garden": 48
+      }
+    },
+    "打板与接力": {
+      "document_counts": {
+        "fulibei": 35,
+        "nanjinglu_bian": 19,
+        "tulip_garden": 12
+      },
+      "chunk_counts": {
+        "fulibei": 465,
+        "nanjinglu_bian": 179,
+        "tulip_garden": 2156
+      }
+    },
+    "竞价与盘口": {
+      "document_counts": {
+        "fulibei": 20,
+        "nanjinglu_bian": 10,
+        "tulip_garden": 35
+      },
+      "chunk_counts": {
+        "fulibei": 274,
+        "nanjinglu_bian": 91,
+        "tulip_garden": 6350
+      }
+    },
+    "复盘与计划": {
+      "document_counts": {
+        "fulibei": 32,
+        "nanjinglu_bian": 21,
+        "tulip_garden": 8
+      },
+      "chunk_counts": {
+        "fulibei": 434,
+        "nanjinglu_bian": 162,
+        "tulip_garden": 992
+      }
+    },
+    "超预期": {
+      "document_counts": {
+        "fulibei": 45,
+        "nanjinglu_bian": 0,
+        "tulip_garden": 0
+      },
+      "chunk_counts": {
+        "fulibei": 629
+      }
+    },
+    "低吸与半路": {
+      "document_counts": {
+        "fulibei": 20,
+        "nanjinglu_bian": 9,
+        "tulip_garden": 15
+      },
+      "chunk_counts": {
+        "fulibei": 224,
+        "nanjinglu_bian": 58,
+        "tulip_garden": 1629
+      }
+    },
+    "预期与超预期": {
+      "document_counts": {
+        "fulibei": 0,
+        "nanjinglu_bian": 18,
+        "tulip_garden": 26
+      },
+      "chunk_counts": {
+        "nanjinglu_bian": 131,
+        "tulip_garden": 4495
+      }
+    },
+    "卖点与退出": {
+      "document_counts": {
+        "fulibei": 13,
+        "nanjinglu_bian": 16,
+        "tulip_garden": 4
+      },
+      "chunk_counts": {
+        "fulibei": 132,
+        "nanjinglu_bian": 103,
+        "tulip_garden": 266
+      }
+    },
+    "筹码与量价": {
+      "document_counts": {
+        "fulibei": 0,
+        "nanjinglu_bian": 3,
+        "tulip_garden": 30
+      },
+      "chunk_counts": {
+        "nanjinglu_bian": 34,
+        "tulip_garden": 6060
+      }
+    },
+    "北交所": {
+      "document_counts": {
+        "fulibei": 8,
+        "nanjinglu_bian": 0,
+        "tulip_garden": 0
+      },
+      "chunk_counts": {
+        "fulibei": 125
+      }
+    }
+  },
+  "interpretation": "coverage_only_not_consensus"
+}

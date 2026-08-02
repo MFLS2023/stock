@@ -1,0 +1,4 @@
+interface:
+  display_name: "交易资料接入整理"
+  short_description: "登记、识别并批量接入多格式交易资料来源"
+  default_prompt: "Use $trading-source-curator to register and ingest a new trading source folder with traceable citations."

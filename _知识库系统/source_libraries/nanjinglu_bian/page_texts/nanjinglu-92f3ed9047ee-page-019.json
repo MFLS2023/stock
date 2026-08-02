@@ -1,0 +1,12 @@
+{
+  "source_hash": "92f3ed9047eed29f2b7abcac9359177bee1019971e0930b933cb5cc08362da44",
+  "dpi": 140,
+  "page": 19,
+  "method": "ocr",
+  "confidence": "medium",
+  "text": "到 0 汾 0 可蘇縱名粽一霧辶 95 公式庙述数 1 . 4 《 5 一 8 《数 9 一 12 《数 13 一 16 丨复跸列》 独设兰 : 公过类型且地类型版本 @二二] 「 用于吒云公便所据全部公式标筌 2 3 KD12g:—EXIDATA IJSER(I HPSKD120 : 012U / (RPSKD12ß<—95 KD25U:—EXTDRTR USEH(2.O PS D250 : 。 H025U / 0U2 : (RPSKD25U<—95 d 050 : 。 EXID I USER(3 的 RPSKD5g : 以鞣D5U/ 12 塹的 RP , ; { RPS12 于 95 , . 〈 25 塹弋的 HPS 》 1 ) ; { RPS25 《二 95 尸这 5 巧天的 RPS 〉 95 六 1 ) . 〈 RPS5g 大于 95 》 , 0g3 : ( PS D50 〈 以 01 : 以 ( 搔 0 DR 鯊 D 馴 3 ) RND H/HHU(HIGH ? 5 另存为涩果 KD12 〔 灕后 : 引用 1 号 《 O 的序列鲞 RPSKDI 2 〔 值 ; K0120 / 10 户@030401279 旧 K 10 值 : 如果 RPSKD120 跹 = 95 , 叵 0 K02 氕匾 : 引用 2 号 0 的列数据 R K025 〔 《自 : K0250 / 10 一线红 95 的代码 ( 95 的数字由自己调整想要的数值 ) : KDI 20:=EXTDATA USER(1,0);{120 天的 RPS} RPSKD120 : = KD120 / 10 ; KDOI:=IF(RPSKDI 20 < =95,0,1);{RPS120 大于 95L KD250:=EXTDATA USER(2,0);{250 天的 RPS} RPSKD250 : = KD250 / 10 ; KD02:=lF(RPSKD250< = 9s0 , 1 ) ; { RPS250 大于 95L KD50:=EXTDATA USER(3,0);{50 天的 RPS} RPSKD50:=KD50/10; KD03 : : 丨 F ( RPSKD50 < : 95 , 0 , 1 ) ; { RPS50 大于 95L KDI:=(KDOI OR KD02 OR KD03) AND H/HHV(HlGH,250)>0.6; KDI;",
+  "embedded_chars": 393,
+  "ocr_chars": 775,
+  "ocr_error": "",
+  "ocr_tiles": 1
+}

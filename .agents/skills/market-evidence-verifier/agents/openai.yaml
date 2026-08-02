@@ -1,0 +1,4 @@
+interface:
+  display_name: "市场事实核验"
+  short_description: "核验最新A股事实并区分历史观点与当前证据"
+  default_prompt: "Use $market-evidence-verifier to verify a date-sensitive A-share claim with current primary evidence."

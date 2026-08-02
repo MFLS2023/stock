@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-08-01T11:26:09.474180+00:00",
+  "passed": 11,
+  "total": 11,
+  "success": true,
+  "checks": [
+    {
+      "name": "根 AGENTS.md",
+      "passed": true,
+      "detail": "项目规则可被新对话自动发现"
+    },
+    {
+      "name": "来源登记",
+      "passed": true,
+      "detail": "登记来源数=3"
+    },
+    {
+      "name": "文件 manifest",
+      "passed": true,
+      "detail": "记录数=529"
+    },
+    {
+      "name": "全部来源内容入库",
+      "passed": true,
+      "detail": "{\"fulibei\": {\"documents\": 110, \"parents\": 441, \"chunks\": 1444}, \"nanjinglu_bian\": {\"documents\": 42, \"parents\": 72, \"chunks\": 343}, \"tulip_garden\": {\"documents\": 42, \"parents\": 154, \"chunks\": 6393}}"
+    },
+    {
+      "name": "统一检索块",
+      "passed": true,
+      "detail": "块数=8180"
+    },
+    {
+      "name": "检索块字段",
+      "passed": true,
+      "detail": "缺字段块数=0"
+    },
+    {
+      "name": "引用定位",
+      "passed": true,
+      "detail": "所有来源检索块均有 locator"
+    },
+    {
+      "name": "SQLite 完整性",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "索引记录数一致",
+      "passed": true,
+      "detail": "SQLite={\"documents\": 194, \"parents\": 667, \"chunks\": 8206} JSONL={\"documents\": 194, \"parents\": 667, \"chunks\": 8206}"
+    },
+    {
+      "name": "样例检索",
+      "passed": true,
+      "detail": "{\"情绪周期\": 462, \"仓位 回撤\": 480, \"92科比\": 88, \"筹码\": 1263, \"弱转强\": 107}"
+    },
+    {
+      "name": "项目 Skills",
+      "passed": true,
+      "detail": "缺失=[]"
+    }
+  ]
+}

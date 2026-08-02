@@ -1,0 +1,23 @@
+{
+  "collected_at": "2026-08-01T19:24:50+08:00",
+  "requirement": "未来持续新增一个来源一个文件夹，格式可能为MD、PDF或混合文档",
+  "decision": "保留一个项目和分来源知识层，将导入层升级为注册表加格式适配器，不按作者复制角色程序",
+  "adapter_policy": {
+    "generic_mixed": "常规MD/TXT/PDF/DOCX/JPG/PNG，一文件一文档，简单页码或章节定位足够",
+    "specialized": "说话人、时间戳、连续截图、复杂Word图文关系、特殊课程顺序或通用导入会丢失语义"
+  },
+  "extension_points": [
+    "sources.yaml动态来源注册",
+    "register_source.py格式和复杂度预检",
+    "import_source.py适配器分发",
+    "import_generic_source.py通用MD/PDF/DOCX/图片处理",
+    "build_index.py自动扫描所有来源库",
+    "build_cross_source.py动态生成任意来源列"
+  ],
+  "non_goals": [
+    "不为每个作者创建重复角色",
+    "不自动交易",
+    "不把历史观点当当前事实",
+    "不在结构复杂时静默降级"
+  ]
+}

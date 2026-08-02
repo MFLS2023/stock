@@ -1,0 +1,40 @@
+version: 1
+project_name: 多来源交易知识库
+source_libraries_root: _知识库系统/source_libraries
+indexes_root: _知识库系统/indexes
+default_adapter: generic_mixed
+generic_supported_extensions: [.md, .txt, .pdf, .docx, .jpg, .jpeg, .png]
+
+sources:
+  - id: fulibei
+    display_name: 复利杯
+    source_path: 复利杯
+    source_type: transcript_pdf
+    status: integrated_first_pass
+    original_policy: read_only
+    primary_locator: page_timestamp
+    pipeline: transcript_with_speakers
+    adapter: specialized_fulibei
+    notes: 多人直播或连麦文字稿，保留嘉宾、说话人、页码和时间戳。
+
+  - id: nanjinglu_bian
+    display_name: 南京路彼岸
+    source_path: 南京路彼岸
+    source_type: dated_article_pdf
+    status: integrated
+    original_policy: read_only
+    primary_locator: page_section
+    pipeline: dated_article_chronology
+    adapter: specialized_nanjinglu
+    notes: 单作者连续文章，重点保留日期、章节、概念定义和观点演化。
+
+  - id: tulip_garden
+    display_name: 郁金香花园
+    source_path: 郁金香花园付费文章文档版
+    source_type: word_image_course
+    status: integrated
+    original_policy: read_only
+    primary_locator: section_image
+    pipeline: word_plus_ordered_ocr
+    adapter: specialized_tulip
+    notes: Word 正文与大量截图并存，必须恢复图片顺序和图文关系，视觉内容需回看原图。

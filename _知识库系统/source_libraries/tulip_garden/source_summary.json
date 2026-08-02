@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-08-01T11:08:21.863072+00:00",
+  "source_id": "tulip_garden",
+  "physical_files": 377,
+  "documents": 42,
+  "word_documents": 19,
+  "image_groups": 22,
+  "external_images": 356,
+  "ocr_images_total": 545,
+  "parents": 154,
+  "chunks": 6393,
+  "characters": 558440,
+  "extraction_counts": {
+    "docx_xml": 5702,
+    "ocr": 532,
+    "markdown": 1
+  },
+  "errors": []
+}

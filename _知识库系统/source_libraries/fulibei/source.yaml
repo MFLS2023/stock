@@ -1,0 +1,7 @@
+id: fulibei
+display_name: 复利杯
+source_type: transcript_pdf
+status: integrated
+citation_locator: page_timestamp
+adapter: specialized_fulibei
+original_path: ../../../复利杯

@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-08-01T10:33:57.587479+00:00",
+  "source_id": "fulibei",
+  "documents": 110,
+  "parents": 441,
+  "chunks": 1444,
+  "curated_methods": 20,
+  "conflicts": 6,
+  "errors": [],
+  "first_pass_summary": {
+    "source_files": 110,
+    "processed_files": 110,
+    "errors": 0,
+    "total_pages": 2123,
+    "total_characters": 1379452,
+    "total_utterances": 22398,
+    "method_card_candidates": 1452,
+    "priority_counts": {
+      "A-优先精读": 25,
+      "B-按主题选读": 30,
+      "C-检索时再读": 30,
+      "D-低优先级": 25
+    },
+    "median_score": 64.5
+  }
+}

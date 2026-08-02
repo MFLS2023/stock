@@ -1,0 +1,4 @@
+interface:
+  display_name: "个人交易日志复盘"
+  short_description: "量化复盘执行偏差、仓位、退出与重复错误"
+  default_prompt: "Use $trading-journal-reviewer to review my trading journal and produce measurable improvement actions."

@@ -1,0 +1,15 @@
+# 原始来源文件夹——内容体积大，不让 Claude Code 索引
+复利杯/**
+南京路彼岸/**
+郁金香花园付费文章文档版/**
+
+# source_libraries 下的原始文本，通过脚本访问，不直接读入上下文
+_知识库系统/source_libraries/**/*.txt
+_知识库系统/source_libraries/**/*.pdf
+_知识库系统/source_libraries/**/*.docx
+
+# 二进制索引，无法直接阅读
+_知识库系统/indexes/*.db
+
+# 个人日志，私密
+_知识库系统/personal/**

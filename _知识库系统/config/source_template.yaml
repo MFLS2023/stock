@@ -1,0 +1,12 @@
+id: source-id
+display_name: 来源名称
+source_path: 根目录下的来源文件夹
+source_type: mixed_documents
+status: registered
+original_policy: read_only
+primary_locator: page_section_image
+pipeline: generic_format_adapters
+adapter: generic_mixed
+author: 作者或来源名称
+review_required: false
+notes: 常规 MD/TXT/PDF/DOCX/图片可先用通用适配器；复杂结构改用 specialized。

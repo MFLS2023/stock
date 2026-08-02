@@ -1,0 +1,4 @@
+interface:
+  display_name: "跨来源交易观点比较"
+  short_description: "比较不同作者的共识、分歧与适用条件"
+  default_prompt: "Use $cross-source-synthesizer to compare multiple trading sources while preserving citations and disagreements."

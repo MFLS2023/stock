@@ -1,0 +1,4 @@
+interface:
+  display_name: "交易知识导师"
+  short_description: "基于本地资料和可追溯引用讲解交易方法"
+  default_prompt: "Use $trading-knowledge-tutor to teach a trading concept from my local corpus with traceable citations."

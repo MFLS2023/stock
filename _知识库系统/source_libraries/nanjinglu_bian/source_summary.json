@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-08-01T11:22:10.158630+00:00",
+  "source_id": "nanjinglu_bian",
+  "files": 42,
+  "documents": 42,
+  "unique_documents": 41,
+  "duplicates": 1,
+  "parents": 72,
+  "chunks": 343,
+  "characters": 174579,
+  "extraction_counts": {
+    "embedded": 91,
+    "ocr": 196,
+    "embedded_fallback": 25
+  },
+  "errors": []
+}

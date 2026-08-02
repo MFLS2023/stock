@@ -1,0 +1,31 @@
+{
+  "collected_at": "2026-08-01T18:00:00+08:00",
+  "project_root": "C:\\Users\\20577\\Documents\\炒股\\知识库",
+  "sources": {
+    "fulibei": {"files": 110, "primary_format": "pdf", "state": "first_pass_complete"},
+    "nanjinglu_bian": {"files": 42, "primary_format": "pdf", "state": "pending"},
+    "tulip_garden": {"files": 377, "primary_format": "jpg+docx+doc", "state": "pending"}
+  },
+  "reusable_assets": {
+    "fulibei_documents": 110,
+    "fulibei_pages": 2123,
+    "fulibei_characters": 1379452,
+    "fulibei_utterances": 22398,
+    "curated_methods": 20,
+    "candidate_quotes": 1452
+  },
+  "key_risks": [
+    "三个来源需要不同提取流水线",
+    "直播转写包含同音字和说话人误差",
+    "图片资料不能只做纯文本抽取",
+    "历史市场观点可能已经过时",
+    "无元数据的单一向量库会丢失来源边界"
+  ],
+  "validation": [
+    "原文件哈希和数量不变",
+    "每个检索块有 source_id、document_id 和 locator",
+    "本地查询返回可追溯结果",
+    "Skills 通过 quick_validate.py",
+    "SQLite integrity_check 通过"
+  ]
+}
