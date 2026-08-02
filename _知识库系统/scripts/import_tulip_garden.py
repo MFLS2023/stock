@@ -22,8 +22,10 @@ from kb_import_utils import (
     extract_date,
     infer_topics,
     meaningful_char_count,
+    merge_short_units,
     natural_key,
     ocr_images,
+    span_locator,
     split_text,
     write_jsonl,
 )
@@ -292,6 +294,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--force-ocr", action="store_true")
     parser.add_argument("--force-convert", action="store_true")
+    parser.add_argument(
+        "--chunk-min-chars", type=int, default=400,
+        help="Merge consecutive Word paragraphs until a chunk reaches this length",
+    )
+    parser.add_argument(
+        "--chunk-max-chars", type=int, default=800,
+        help="Flush a merged chunk before it exceeds this length",
+    )
     args = parser.parse_args()
     for name in ("texts", "assets", "converted_docx", "image_ocr_cache", "maps"):
         (LIB / name).mkdir(parents=True, exist_ok=True)
@@ -379,6 +389,15 @@ def main() -> int:
             extraction_counts[unit.get("method", "unknown")] += 1
             for part in split_text(unit["text"], 1200):
                 expanded_units.append({**unit, "text": part})
+        # Word stores one sentence per <w:p>, so raw units are far too short to read
+        # on their own. Merge consecutive prose units; image OCR units stay standalone
+        # because each one is an independent retrieval target with its own image_path.
+        expanded_units = merge_short_units(
+            expanded_units,
+            min_chars=args.chunk_min_chars,
+            max_chars=args.chunk_max_chars,
+            mergeable=lambda unit: not unit.get("image_key") and unit.get("method") == "docx_xml",
+        )
         normalized_text = "\n\n".join(
             f"[{unit['locator']} | {unit.get('method', 'unknown')}]\n{unit['text']}" for unit in expanded_units
         )
@@ -398,7 +417,7 @@ def main() -> int:
         })
         for parent_number, parent_group in enumerate(group_units(expanded_units, 4200), start=1):
             parent_id = f"{spec['doc_id']}-p{parent_number:03d}"
-            locator = parent_group[0]["locator"] if len(parent_group) == 1 else f"{parent_group[0]['locator']}—{parent_group[-1]['locator']}"
+            locator = span_locator(parent_group[0]["locator"], parent_group[-1]["locator"])
             parent_rows.append({
                 "source_id": SOURCE_ID, "document_id": spec["doc_id"], "parent_id": parent_id,
                 "title": spec["title"], "date": date, "author_or_guest": "郁金香花园",

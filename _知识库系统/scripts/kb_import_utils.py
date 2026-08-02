@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import unicodedata
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -157,6 +157,115 @@ def split_text(text: str, target_chars: int) -> list[str]:
     if current_parts:
         groups.append("\n".join(current_parts))
     return groups
+
+
+def span_locator(head: str, tail: str) -> str:
+    """Join two locators into one range, flattening locators that are already ranges.
+
+    Merged units carry ranges like ``正文第1段—正文第9段``. Naively joining those
+    again produces four-part strings such as ``正文第1段—正文第9段—正文第11段—正文第20段``,
+    so only the outermost endpoints are kept.
+    """
+    start = (head or "").split("—")[0]
+    end = (tail or "").split("—")[-1]
+    if not start:
+        return end
+    if not end or start == end:
+        return start
+    return f"{start}—{end}"
+
+
+def _looks_like_heading(text: str) -> bool:
+    """A short standalone line that titles the paragraphs after it."""
+    stripped = text.strip()
+    if len(stripped) > 30:
+        return False
+    if re.match(r"^(第[一二三四五六七八九十百\d]+[章节讲部分篇]|[一二三四五六七八九十]+[、.．]|\d+[、.．)）])", stripped):
+        return True
+    # A short line without sentence-ending punctuation reads as a title.
+    return bool(stripped) and not re.search(r"[。！？；!?;，,]$", stripped)
+
+
+def merge_short_units(
+    units: Sequence[dict],
+    *,
+    min_chars: int = 400,
+    max_chars: int = 800,
+    text_key: str = "text",
+    locator_key: str = "locator",
+    mergeable: "Callable[[dict], bool] | None" = None,
+    join_with: str = "\n",
+) -> list[dict]:
+    """Merge consecutive short prose units so each chunk can stand on its own.
+
+    Word documents often store one sentence per ``<w:p>``, which yields chunks too
+    short to interpret. Units are accumulated until ``min_chars`` is reached and
+    flushed before exceeding ``max_chars``; the merged locator becomes a range so
+    citations still point back to the original paragraphs.
+
+    ``mergeable`` marks units that must stay standalone (image OCR units, tables).
+    A non-mergeable unit flushes the pending group and passes through untouched, so
+    document order is always preserved.
+
+    Headings start a new group only once the pending group has reached ``min_chars``.
+    Below that the heading is absorbed rather than allowed to split the group: these
+    course exports contain many short lines that merely look like titles, so breaking
+    on them eagerly produces fragments instead of readable blocks.
+    """
+    if min_chars > max_chars:
+        raise ValueError(f"min_chars ({min_chars}) must not exceed max_chars ({max_chars})")
+
+    def is_mergeable(unit: dict) -> bool:
+        return mergeable(unit) if mergeable else True
+
+    merged: list[dict] = []
+    pending: list[dict] = []
+
+    def flush() -> None:
+        if not pending:
+            return
+        if len(pending) == 1:
+            merged.append(pending[0])
+        else:
+            first, last = pending[0], pending[-1]
+            combined = {
+                **first,
+                text_key: join_with.join(unit.get(text_key, "") for unit in pending),
+                locator_key: span_locator(first.get(locator_key, ""), last.get(locator_key, "")),
+                "merged_unit_count": len(pending),
+                "merged_locators": [unit.get(locator_key, "") for unit in pending],
+            }
+            # Keep the weakest confidence: a merged block is only as good as its
+            # least reliable part.
+            order = {"low": 0, "medium": 1, "high": 2}
+            levels = [unit.get("confidence") for unit in pending if unit.get("confidence") in order]
+            if levels:
+                combined["confidence"] = min(levels, key=lambda level: order[level])
+            merged.append(combined)
+        pending.clear()
+
+    for unit in units:
+        if not is_mergeable(unit):
+            flush()
+            merged.append(unit)
+            continue
+        text = unit.get(text_key, "") or ""
+        pending_length = sum(len(item.get(text_key, "") or "") for item in pending)
+        # A heading belongs with the text it introduces, so break before it once the
+        # pending group already meets the target length. Breaking earlier was measured
+        # on tulip_garden and made things worse: a floor of min_chars // 3 cut the
+        # median prose chunk from 428 to 174 characters, because most "headings" in
+        # these course exports are ordinary short lines, not section titles.
+        if pending and pending_length >= min_chars and _looks_like_heading(text):
+            flush()
+            pending_length = 0
+        if pending and pending_length + len(text) > max_chars:
+            flush()
+        pending.append(unit)
+        if sum(len(item.get(text_key, "") or "") for item in pending) >= min_chars:
+            flush()
+    flush()
+    return merged
 
 
 def _tile_boxes(width: int, height: int, max_dim: int, overlap: int):
