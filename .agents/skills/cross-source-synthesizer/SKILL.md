@@ -8,7 +8,7 @@ description: Compare multiple trading authors or source libraries while preservi
 ## Workflow
 
 1. Require at least two integrated source scopes. State which sources are available and which are pending.
-2. Search each source separately before combining results. Expand queries with known synonyms: 竞价/竟价, 弱转强/转势/先弱后强, 龙头/核心票/人气核心, 情绪冰点/极度低迷/退潮.
+2. Search each source separately before combining results. Expand queries with known synonyms: 竞价/竟价/集合竞价, 弱转强/转势, 龙头/核心票/人气核心, 情绪周期/情绪冰点/退潮.
 3. Normalize terms only after checking their source-specific definitions. Similar words do not automatically mean identical concepts.
 4. Build a comparison with:
    - shared observations;
