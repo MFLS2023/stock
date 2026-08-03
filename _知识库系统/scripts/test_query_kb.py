@@ -41,30 +41,39 @@ either declared per source in sources.yaml (smoke_query) or derived from that so
 text, author coverage is scoped to sources that carry authorship, and per-term coverage is
 computed from which sources actually hold matches. See smoke_query_for().
 
-Cases marked ``expectedFailure`` state the behaviour SPEC.md requires but the
-current code does not deliver. Three rules, per SPEC 3.0:
+**本文件已不含任何 ``expectedFailure``。** 阶段 3 摘除了最后一个，全轮四个阶段的
+15 个标记全部归零（SPEC 3.0 的生命周期表：阶段 0 留 15、阶段 1 留 12、阶段 2 留 1、
+阶段 3 留 0）。历史上这些标记描述的是 SPEC 要求而当时代码不满足的行为，规则是：
 
-1. When a fix lands, the case flips to "unexpected success" and unittest exits
-   with code **1**, not 0. That is a red build, not a green one. The marker must be
-   deleted in the same commit as the fix, and the suite re-run to a plain PASS.
-2. 尚未实施的后续阶段允许继续保留标记：那描述的是后面才动手的缺陷，此刻失败正是它
-   应有的状态。但输出里不得出现 ``unexpected successes`` 或 ``skipped``，剩余的
-   ``expected failures`` 必须逐项交代得出所属阶段。到阶段 3 完成时必须归零。
+1. 修复落地时用例翻成 "unexpected success"，unittest 退出码是 **1** 而不是 0——
+   那是红灯不是绿灯。所以装饰器必须与修复在**同一个提交**里删掉，再重跑到普通 PASS。
+2. 输出里不得出现 ``unexpected successes`` 或 ``skipped``。前者是"修好了但标记没摘"，
+   后者是"这批断言根本没跑"。
 3. Set ``KB_REQUIRE_REAL_INDEX=1`` to turn a missing knowledge.db from a silent skip
    into a hard failure — without it, RealIndexTests can skip 20-odd assertions and
    still print "OK".
 
-阶段 2 完成后剩余 1 项：``SourceCoverageTests.test_prose_matches_must_outrank_label_only_matches``
-（排序权重，阶段 3）。阶段 2 摘除了 11 项，其中 9 项按修复后的事实改写并改名——名字
-里的 ``must_`` 和 ``fallback`` 去掉了，因为 LIKE 兜底路径连同它按 rowid 截断的候选池
-一起被删除，``rank == 999.0`` 这个哨兵值不再出现在任何路径上。
+阶段 3 摘除的那一项是 ``SourceCoverageTests.test_prose_matches_must_outrank_label_only_matches``，
+按修复后的事实改名为 ``test_prose_matches_outrank_title_and_author_only_matches``：
+阶段 2 把 topics 移出召回之后，压过正文命中的已经不是标签块（那些块根本进不了候选集），
+而是仅标题/仅作者含词的块，名字里的 ``label_only`` 随之改掉。同一提交里另有一条阶段 2
+的断言被改写——``test_default_limit_no_longer_collapses_to_the_first_source`` 当年成立
+靠的正是 author 5.0 / title 3.0 压过正文 1.0，即本阶段要修的那个缺陷，所以权重一改它就
+翻红；它同时是一条隐性来源配额（SPEC 阶段 3 明确不检查小 limit 结果的来源数量），
+改成钉"前 8 条一条都不在旧候选池里"。
+
+阶段 2 摘除了 11 项，其中 9 项按修复后的事实改写并改名——名字里的 ``must_`` 和
+``fallback`` 去掉了，因为 LIKE 兜底路径连同它按 rowid 截断的候选池一起被删除，
+``rank == 999.0`` 这个哨兵值不再出现在任何路径上。
 """
 
 from __future__ import annotations
 
 import inspect
+import itertools
 import json
 import os
+import random
 import re
 import sqlite3
 import sys
@@ -75,7 +84,30 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from build_index import add_chunk, create_schema
-from query_kb import glob_fold_ascii_case, glob_literal, glob_pattern, search
+from query_kb import (
+    ASCII_FOLD,
+    FIELD_WEIGHTS,
+    MATCH_MIN_LENGTH,
+    UNICODE_FOLD,
+    UNICODE_FOLD_TABLE,
+    FieldFolds,
+    FoldedTerm,
+    fold,
+    fold_kind_for,
+    fold_unicode,
+    folded_terms,
+    glob_fold_ascii_case,
+    glob_literal,
+    glob_pattern,
+    matched_term_count,
+    needs_cased_fold,
+    prose_hit,
+    rank_and_truncate,
+    ranking_key,
+    search,
+    split_terms_by_length,
+    terms_from_query,
+)
 
 
 # infer_topics() labels every chunk with 5-6 topics drawn from taxonomy.yaml. The
@@ -130,6 +162,7 @@ def chunk(
     topics: str = TOPIC_LABEL,
     title: str = "示例文档",
     author: str = "示例作者",
+    chunk_type: str = "transcript",
 ) -> dict:
     return {
         "chunk_id": f"{source_id}-{index:04d}",
@@ -137,7 +170,7 @@ def chunk(
         "source_name": source_id,
         "document_id": f"{source_id}-doc",
         "parent_id": f"{source_id}-p001",
-        "chunk_type": "transcript",
+        "chunk_type": chunk_type,
         "title": title,
         "date": "2026-01-01",
         "author": author,
@@ -147,6 +180,42 @@ def chunk(
         "text": text,
         "confidence": "medium",
     }
+
+
+def fts5_folded(text: str) -> str:
+    """把整串交给**真** trigram 分词器，从它切出的 gram 序列重建它眼里的折叠形式。
+
+    这是折叠差分测试的基准，必须由 FTS5 现场给出。硬编码期望值等于把当前 SQLite
+    版本的行为抄成常量：换个版本，测试会变成"在说谎"而不是"在报警"。
+
+    长度 n 的串产出 n-2 个 trigram，第 i 个恰是 ``folded[i:i+3]``，所以折叠形式
+    = 第 0 个 term + 其后每个 term 的末字符。读法与 query_kb.build_fold_table() 相同，
+    区别是那边喂码点区间、这边喂任意串——**上下文相关的折叠只在整串里暴露**，
+    ``str.lower()`` 对词尾 ``Σ`` 的 Final_Sigma 映射就是逐字符测不出来的那一类。
+    """
+    if len(text) < 3:
+        raise ValueError("trigram 对短于 3 字符的串不产 token，无法反推折叠形式")
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute("CREATE VIRTUAL TABLE p USING fts5(t, tokenize='trigram')")
+        connection.execute("INSERT INTO p(t) VALUES (?)", (text,))
+        connection.execute("CREATE VIRTUAL TABLE v USING fts5vocab(p, 'instance')")
+        rows = connection.execute("SELECT offset, term FROM v ORDER BY offset").fetchall()
+    finally:
+        connection.close()
+    if [offset for offset, _ in rows] != list(range(len(text) - 2)):
+        raise RuntimeError("FTS5 trigram 的 offset 序列不连续，无法反推折叠形式")
+    return rows[0][1] + "".join(term[2] for _, term in rows[1:])
+
+
+# 三套折叠规则分歧最集中的四组字符，用户复审点名要覆盖的就是这四组。
+# 取全部三字排列（27 + 27 + 8 + 64 = 126 例），每例再配一份中文上下文。
+FOLD_DIFF_GROUPS = (
+    ("sigma", "Σσς"),      # 词尾 Σ：lower() 走 Final_Sigma 折成 ς，FTS5 折成 σ
+    ("long s", "Ssſ"),     # ſ：FTS5 折成 s，lower() 原样不动（它本就是小写）
+    ("sharp s", "ẞß"),     # ẞ：FTS5 折成 ß，casefold() 展开成 ss，长度都变了
+    ("dotted I", "İIiı"),  # İ：FTS5 不折，lower() 拆成 i + U+0307 两个码点
+)
 
 
 # Chunks whose TITLE carries the two-character term while the prose does not. On the real
@@ -725,11 +794,11 @@ class ShortTermSearchTests(unittest.TestCase):
 
 
 class SourceCoverageTests(unittest.TestCase):
-    """SPEC 缺陷 C 的召回部分（阶段 2 已修）：候选池曾按 rowid 截断，结果偏向单一来源。
+    """SPEC 缺陷 C（阶段 2 修召回、阶段 3 修排序）：候选池曾按 rowid 截断且评分方向是反的。
 
     阶段 2 删掉了 candidate_limit，候选集先取全量再截断，所以下面这张表记的是修复前的
-    候选池构成，作为缺陷成因的存档。排序部分（正文命中要排在纯标签命中之前）归阶段 3，
-    这个类里唯一保留 expectedFailure 的用例就是那一条。
+    候选池构成，作为缺陷成因的存档。阶段 3 修的是排序部分（正文命中要排在仅标题/仅作者
+    命中之前），本文件最后一个 expectedFailure 就在这个类里，已随修复摘除。
 
     Measured read-only on 2026-08-02 over the frozen regression sample, as
     fulibei/nanjinglu_bian/tulip_garden. Candidate pool = max(limit*30, 120) = 240:
@@ -777,16 +846,39 @@ class SourceCoverageTests(unittest.TestCase):
         ).fetchall()
         self.assertEqual(sources_of(pool), {"fulibei": 240})
 
-    def test_default_limit_no_longer_collapses_to_the_first_source(self):
-        # 阶段 2 前这条叫 ..._currently_returns_one_source_only，钉的是 {"fulibei"}：
-        # 候选池按 rowid 截满 240 条 fulibei，其余来源一条进不来。候选池已全量化，
-        # 实测前 8 条变成 tulip_garden 5 + nanjinglu_bian 3。
+    def test_default_limit_is_not_taken_from_the_truncated_pool(self):
+        # 阶段 3 改写。阶段 2 这条叫 ..._no_longer_collapses_to_the_first_source，断言
+        # ``set(sources_of(rows)) != {"fulibei"}``；再往前叫 ..._currently_returns_one_
+        # source_only，钉的是 {"fulibei"}——候选池按 rowid 截满 240 条 fulibei，其余
+        # 来源一条进不来。
         #
-        # 断言仍然不是"必须跨 N 个来源"——SPEC 阶段 3 明确不设来源配额，写配额会诱导
-        # 实现去凑。这里只要求：前 8 条不再是"rowid 最小的那个来源"独占，且每一条都
-        # 真的在三字段并集里。前者证明截断没了，后者证明没拿标签噪声来填。
+        # **那条断言当年成立是个巧合，而且巧合的来源正是阶段 3 要修的缺陷。** 阶段 2 的
+        # relevance() 给 author 5.0、title 3.0、正文 1.0，于是前 8 条是 5 条 author-only
+        # （9.0 分）+ 3 条 title-only（7.0 分），正文块只有 6.0 分排不上去。这 8 条恰好
+        # 分布在 tulip_garden 和 nanjinglu_bian 上，所以"不是 fulibei 独占"通过了——
+        # 靠的是"标题命中压过正文命中"，也就是同一个类里那条阶段 3 expectedFailure 记录
+        # 的缺陷。权重修正之后正文块升到最高档，而 fixture 里 chunk_id 最小的正文块是
+        # fulibei-0281..0288，前 8 条重新变成 fulibei 独占，这条断言就翻红了。
+        #
+        # 而且它本身就是一条**隐性来源配额**：SPEC 阶段 3 明确"小 limit 的结果里不检查
+        # 来源数量"，并记录了同类断言 test_two_character_query_must_span_sources 被删除的
+        # 原因。"不许是某一个来源独占"和"至少跨 2 个来源"是同一件事的两种说法。
+        #
+        # 改成钉真正区分修好没修好的性质：前 8 条**一条都不在旧候选池里**。旧池是
+        # rowid 最小的 240 条（fulibei 的 1..240，全是只挂标签的块，正文真含 0 条），
+        # 旧实现只能从这 240 条里挑，所以交集为空就证明截断确实没了，而这与结果落在
+        # 哪个来源无关。第二条断言保留：前 8 条条条在三字段并集内，没拿标签噪声来填。
         rows = self.search("竞价")
-        self.assertNotEqual(set(sources_of(rows)), {"fulibei"})
+        old_pool = {
+            row[0]
+            for row in self.connection.execute(
+                "SELECT chunk_id FROM chunks "
+                "WHERE (text LIKE ? OR title LIKE ? OR author LIKE ? OR topics LIKE ?) LIMIT ?",
+                [*["%竞价%"] * 4, 240],
+            )
+        }
+        self.assertEqual(len(old_pool), 240, "旧候选池形状变了，这条断言的分母就没了")
+        self.assertFalse({row["chunk_id"] for row in rows} & old_pool)
         self.assertTrue(
             {row["chunk_id"] for row in rows} <= recall_target_ids(self.connection, "竞价")
         )
@@ -818,13 +910,135 @@ class SourceCoverageTests(unittest.TestCase):
         self.assertEqual({row["chunk_id"] for row in rows}, recall_target_ids(self.connection, "竞价"))
         self.assertEqual(set(sources_of(rows)), set(expected))
 
-    @unittest.expectedFailure
-    def test_prose_matches_must_outrank_label_only_matches(self):
-        # relevance() 给 topics 权重 4.0、正文 1.0，而 topics 是自动标签。
-        # 实测 fixture：前 8 条正文真含 0/8，全是只挂了标签的块。
-        # 真库里『竞价』有 1221 块是"仅 topics 含、正文不含"，同样排在真讲竞价的块前面。
+    def test_prose_matches_outrank_title_and_author_only_matches(self):
+        # 阶段 3 摘除 expectedFailure（本轮最后一个），并按修复后的事实改名。
+        #
+        # **原名里的"label_only"在阶段 2 之后已经不准确了。** 原注释记的是：relevance()
+        # 给 topics 4.0、正文 1.0，前 8 条全是只挂标签的块，正文真含 0/8。阶段 2 把
+        # topics 移出召回之后，纯标签块根本进不了候选集，前 8 条的实际构成变成
+        # 5 条 author-only（9.0 分）+ 3 条 title-only（7.0 分）——正文块 6.0 分仍然排不
+        # 上去，正文真含仍是 0/8，但压过它的已经不是 topics 4.0，而是 author 5.0 和
+        # title 3.0。名字随实际缺陷形态改成 title_and_author_only。
+        #
+        # 修法是 ranking_key() 的第一层：正文命中（prose_hit）先于一切。不是靠把 text
+        # 权重调到比 title 高——权重可以被数量抵消，一个标题里重复三次该词的块照样能
+        # 盖过只提一次的正文块，而"正文有没有讲这个词"是定性区别，不该被计数抵消。
+        #
+        # topics 那一侧同时钉住：权重降到 0.0，且纯标签块本来就在召回之外，所以断言
+        # 顺带验证前 8 条与纯标签集无交集——两个方向一起守，避免将来把 topics 塞回召回
+        # 时这条测试还是绿的。
         rows = self.search("竞价")
+        self.assertEqual(len(rows), 8)
         self.assertTrue(all("竞价" in row["text"] for row in rows))
+        self.assertFalse({row["chunk_id"] for row in rows} & label_only_ids(self.connection, "竞价"))
+
+    def test_a_prose_match_outranks_a_title_match_even_with_fewer_hits(self):
+        # 上一条的加强版，也是"为什么第一层是布尔而不是权重"的直接证据。
+        #
+        # fixture 里 title-only 块的标题是 TITLE_WITH_TERM（『竞价专题整理』，含词 1 次），
+        # 正文块含词 2 次。把 text 权重调成 3.0、title 调成 2.0 就能让 6.0 > 2.0，
+        # 这条测试照样过——所以它单独构造一个反例：标题里重复该词、正文只提一次的块，
+        # 在任何"text 权重 > title 权重"的加权求和实现里都会翻红，只有布尔分层才拦得住。
+        #
+        # 用独立的临时连接，不碰类级 fixture 那批钉死的绝对数字（165/310/475）。
+        connection = build_fixture()
+        try:
+            add_chunk(
+                connection,
+                chunk(
+                    "tulip_garden",
+                    900,
+                    without_term(900),  # 正文不含『竞价』
+                    title="竞价竞价竞价竞价专题",  # 标题含 4 次
+                ),
+            )
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 901, "第901节只提到一次竞价。", title="普通标题"),
+            )
+            connection.commit()
+            order = [row["chunk_id"] for row in search(connection, "竞价", None, None, 500)]
+            self.assertLess(
+                order.index("tulip_garden-0901"),
+                order.index("tulip_garden-0900"),
+                "正文命中必须排在纯标题命中之前，哪怕标题命中次数多得多",
+            )
+        finally:
+            connection.close()
+
+    def test_more_matched_terms_outrank_fewer(self):
+        # SPEC 2.2 评分层第三条：多词命中数越多排越前。
+        #
+        # fixture 里 竞价 与 SECOND_TERM 的正文互不重叠（FixtureShapeTests 的
+        # test_the_two_terms_never_co_occur 守着），所以造一块同时含两个词的，它必须排在
+        # 任何只含单词的块之前——哪怕那些单词块的词频高得多。
+        #
+        # 这一层同样不能用加权求和替代：单词块把 竞价 刷到 8 次（上限）就能拿满 24.0 分，
+        # 而双词块两个词各 1 次只有 6.0 分。所以多词命中必须是独立的一层，排在字段
+        # 加权分之前。
+        connection = build_fixture()
+        try:
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 910, f"第910节同时讲竞价和{SECOND_TERM}，各提一次。"),
+            )
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 911, "竞价" * 20 + "，第911节只讲这一个词。"),
+            )
+            connection.commit()
+            order = [
+                row["chunk_id"]
+                for row in search(connection, f"竞价 {SECOND_TERM}", None, None, 500)
+            ]
+            self.assertLess(
+                order.index("tulip_garden-0910"),
+                order.index("tulip_garden-0911"),
+                "两个词都命中的块必须排在只命中一个词的高频块之前",
+            )
+        finally:
+            connection.close()
+
+    def test_chunk_id_breaks_ties_so_order_does_not_depend_on_rowid(self):
+        # SPEC 2.2 确定性层：排序末尾加 chunk_id 作为决胜字段。
+        #
+        # fixture 里 150 个正文块的前三层键完全相同（都是 (-1, -1, -6.0)），此前靠 SQLite
+        # 返回的 rowid 顺序兜着。rowid 在同一个库里稳定，但重建索引后按目录名和文件顺序
+        # 重新分配，所以"两次查询结果相同"在跨重建时并不成立。
+        #
+        # 验法是把同一批块用**相反的插入顺序**建一个库：rowid 全反了，chunk_id 没变。
+        # 有 chunk_id 决胜则两个库的结果逐条相等；没有则完全颠倒。
+        forward = build_fixture()
+        try:
+            tied = [
+                row["chunk_id"]
+                for row in search(forward, "竞价", None, None, 500)
+            ]
+        finally:
+            forward.close()
+
+        reversed_connection = sqlite3.connect(":memory:")
+        reversed_connection.row_factory = sqlite3.Row
+        create_schema(reversed_connection)
+        try:
+            source = build_fixture()
+            try:
+                items = source.execute("SELECT * FROM chunks ORDER BY rowid DESC").fetchall()
+            finally:
+                source.close()
+            for item in items:
+                add_chunk(reversed_connection, dict(item))
+            reversed_connection.commit()
+            reversed_order = [
+                row["chunk_id"]
+                for row in search(reversed_connection, "竞价", None, None, 500)
+            ]
+        finally:
+            reversed_connection.close()
+
+        self.assertEqual(tied, reversed_order, "并列顺序不得依赖 rowid（即插入顺序）")
+        # 空转保护：这批结果里真的存在前三层并列的块，否则上面那条比较测不到决胜层。
+        self.assertGreater(len(tied), 100)
 
     def test_fts_path_ranks_across_the_whole_table(self):
         # The FTS branch scores every matching row before truncating, so a large limit
@@ -890,9 +1104,629 @@ class RetrievalContractTests(unittest.TestCase):
     def test_limit_prefix_is_stable_as_limit_grows(self):
         # A larger limit must extend the result list, not reshuffle it. Without this,
         # limit=8 and limit=20 can disagree about the top 8 and both look plausible.
-        short = [row["chunk_id"] for row in self.search("弱转强", limit=8)]
-        long = [row["chunk_id"] for row in self.search("弱转强", limit=40)]
-        self.assertEqual(long[:8], short)
+        #
+        # 阶段 3 把词表从单个 弱转强 扩到三条路径各一个：长词走 MATCH、短词走 GLOB、
+        # 混合查询两条都走。阶段 2 时两条路径用两把不同的尺子，这条只测了 MATCH 那把；
+        # 统一到 ranking_key() 之后三种查询的前缀稳定性都由同一个实现保证，一起钉住。
+        for query in ("弱转强", "竞价", f"竞价 {SECOND_TERM}", "竞价 弱转强"):
+            with self.subTest(query=query):
+                short = [row["chunk_id"] for row in self.search(query, limit=8)]
+                long = [row["chunk_id"] for row in self.search(query, limit=40)]
+                self.assertEqual(len(short), 8)
+                self.assertEqual(long[:8], short)
+
+    def test_ranking_is_independent_of_the_candidate_arrival_order(self):
+        # 确定性的实现层断言：ranking_key() 排序的结果不依赖输入列表的顺序。
+        #
+        # 上面那两条测的是 search() 的可观察行为，两次调用之间输入顺序恰好相同，所以
+        # 即便实现里残留一个"靠 sorted 稳定性兜住并列"的依赖也测不出来。这里直接把同一
+        # 批候选行打乱再排，要求结果逐条相同——决胜层缺失时这条必然翻红。
+        rows = search(self.connection, "竞价", None, None, 500)
+        self.assertGreater(len(rows), 100)
+        ordered = [row["chunk_id"] for row in rank_and_truncate(list(rows), ["竞价"], 500)]
+        shuffled = list(rows)
+        random.Random(20260803).shuffle(shuffled)
+        self.assertNotEqual(
+            [row["chunk_id"] for row in shuffled], ordered, "打乱之后与有序输入相同，这条测不到东西"
+        )
+        self.assertEqual(
+            [row["chunk_id"] for row in rank_and_truncate(shuffled, ["竞价"], 500)], ordered
+        )
+
+    def test_topics_weight_does_not_exceed_the_prose_weight(self):
+        # SPEC 3.1 阶段 3 验收表第二行：topics 权重 ≤ 正文权重。阶段 2 的实测值是
+        # topics 4.0 对正文 1.0，方向是反的。
+        #
+        # 直接钉常量而不只是钉行为：行为断言（前 8 条正文真含）在"topics 权重仍然很高但
+        # 恰好没有块能靠它上榜"的数据上会假通过，而权重方向是契约本身。
+        self.assertLessEqual(FIELD_WEIGHTS["topics"], FIELD_WEIGHTS["text"])
+        self.assertLessEqual(FIELD_WEIGHTS["title"], FIELD_WEIGHTS["text"])
+        self.assertLess(FIELD_WEIGHTS["topics"], FIELD_WEIGHTS["title"])
+        # SPEC 2.2 的字段权重契约是 text ≥ title > topics。author 不在那三者之列，
+        # 归到 title 这一档（同为人写的短字段），所以它也不得超过 text。
+        self.assertLessEqual(FIELD_WEIGHTS["author"], FIELD_WEIGHTS["text"])
+
+    def test_a_topics_only_chunk_cannot_be_promoted_by_its_label(self):
+        # 权重常量的行为侧配对断言。topics 权重为 0 时，往一个块的 topics 里反复塞该词
+        # 不能改变它的位次——阶段 2 的 4.0 权重下，塞三次就是 12.0 分，足以越过一批
+        # 正文块。
+        connection = build_fixture()
+        try:
+            baseline = [
+                row["chunk_id"] for row in search(connection, "竞价", None, None, 500)
+            ]
+            # 挑一个排在末尾附近的块（tulip_garden-0304 是 author-only 那批的最后一条），
+            # 这样"靠标签往前挤"一旦发生，位次变化必然可见。
+            target = baseline[-1]
+            connection.execute(
+                "UPDATE chunks SET topics = ? WHERE chunk_id = ?",
+                ("竞价 竞价 竞价 竞价与盘口", target),
+            )
+            connection.commit()
+            after = [row["chunk_id"] for row in search(connection, "竞价", None, None, 500)]
+            self.assertEqual(baseline, after)
+            self.assertEqual(after[-1], target, "被塞标签的块仍应留在原位，标签不得抬升位次")
+        finally:
+            connection.close()
+
+    def test_duplicate_terms_do_not_change_results(self):
+        """查询词按首次出现顺序去重。
+
+        "竞价 情绪" 和 "竞价 竞价 情绪" 的结果及顺序必须完全相同。
+        matched_term_count 只能计算不同检索词。
+        """
+        results_once = [
+            row["chunk_id"] for row in self.search("竞价 情绪", limit=20)
+        ]
+        results_dup = [
+            row["chunk_id"]
+            for row in self.search("竞价 竞价 情绪", limit=20)
+        ]
+        self.assertEqual(
+            results_once,
+            results_dup,
+            "重复检索词不得改变召回和排序",
+        )
+
+    def test_case_variants_of_one_term_count_as_one_term(self):
+        """去重要按**检索等价关系**，不能按字面。
+
+        ``AI``/``ai``/``Ai``/``aI`` 走同一条短词路径、ASCII 折叠后同为 ``ai``，召回的块
+        集合逐条相同。按字面去重会把它们当四个词，于是 matched_term_count 被重复计数
+        撑大——同时含 ``AI`` 和 ``情绪`` 的块拿 5 而不是 2，只含 ``AI`` 的块拿 4 而不是
+        1，第 2 层排序键失真，顺序与 ``AI 情绪`` 不同。用户看到的是"多打几遍大小写变体，
+        结果就换了一批顺序"。
+
+        用 fixture 里真实存在的两字词 ``竞价`` 配一个 ASCII 词，避免这条测试依赖
+        大小写 fixture 的块号。``竞价`` 本身无大小写，所以变体只加在 ASCII 词上。
+        """
+        connection = build_fixture()
+        try:
+            # 往 fixture 里塞两块含 ASCII 词的：一块正文含 AI + 竞价，一块只含 AI。
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 940, "这块正文讲 AI 硬件方向的竞价承接。"),
+            )
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 941, "这块正文只讲 AI 硬件，不提那个两字词。"),
+            )
+            connection.commit()
+
+            baseline = [
+                row["chunk_id"] for row in search(connection, "AI 竞价", None, None, 30)
+            ]
+            # 四种写法混打，中间还夹一次重复的 竞价——结果必须与上面逐条相同。
+            for query in (
+                "AI ai Ai aI 竞价",
+                "AI 竞价 ai Ai aI",
+                "ai AI 竞价 竞价",
+            ):
+                with self.subTest(query=query):
+                    variants = [
+                        row["chunk_id"]
+                        for row in search(connection, query, None, None, 30)
+                    ]
+                    self.assertEqual(
+                        variants,
+                        baseline,
+                        "大小写变体属于同一个检索词，不得改变召回或顺序",
+                    )
+
+            # 词表层面直接钉住：四种写法折成一个，且保留首次出现的原始写法。
+            self.assertEqual(terms_from_query("AI ai Ai aI 竞价"), ["AI", "竞价"])
+            self.assertEqual(
+                terms_from_query("ai AI 竞价"),
+                ["ai", "竞价"],
+                "去重键按折叠形式，但返回的必须是用户首次写下的形式",
+            )
+            # 排序键层面钉住：词表经 terms_from_query() 去重后，940 含两个词、941 含一个。
+            # 关键是 prepared 必须由**去重后的词表**构造——这正是 search() 内部的走法。
+            # 若跳过去重直接喂五个变体，940 会拿到 5、941 拿到 4，第 2 层排序键就失真了。
+            prepared = folded_terms(tuple(terms_from_query("AI ai Ai aI 竞价")))
+            self.assertEqual(len(prepared), 2, "去重后只剩两个检索词")
+            rows = {
+                row["chunk_id"]: row
+                for row in search(connection, "AI 竞价", None, None, 500)
+            }
+            self.assertEqual(matched_term_count(FieldFolds(rows["tulip_garden-0940"]), prepared), 2)
+            self.assertEqual(matched_term_count(FieldFolds(rows["tulip_garden-0941"]), prepared), 1)
+            # 反向钉住"为什么必须去重"：不去重就是失真的那个数。
+            unduped = folded_terms(("AI", "ai", "Ai", "aI", "竞价"))
+            self.assertEqual(
+                matched_term_count(FieldFolds(rows["tulip_garden-0941"]), unduped),
+                4,
+                "这条记录的是未去重时的失真值，用来证明上面那条不是恒真",
+            )
+        finally:
+            connection.close()
+
+    def test_short_term_scoring_folds_ascii_only(self):
+        """**短词**的评分口径必须与它的召回路径（GLOB）一致：只折 ASCII。
+
+        两字词走三列 ``GLOB '*[Aa][Ii]*'``，而 GLOB 对非 ASCII 一律精确匹配——实测
+        ``GLOB '*ΑΑ*'`` 不命中只含 ``αα`` 的块，``SELECT lower('ΑΑ')='αα'`` 也是 0。
+        所以评分侧若用 ``str.lower()``，就会给一个根本没被召回的写法记上命中。
+
+        **这条测试此前是空转的。** 原版两个块都不带 ``title``，正文一个含 ``αα``、
+        一个含 ``AI``，于是查 ``AI ΑΑ`` 时 920 块两个词都不命中、压根进不了候选集，
+        末尾那句排序断言被包在 ``if 920 in ids and 921 in ids`` 里，从来没执行过。
+        重写的关键是**让两个块都通过标题里的 AI 进入候选集**，这样两块必然都在结果里，
+        断言可以无条件写。
+        """
+        connection = build_fixture()
+        try:
+            # 两块的标题都含 AI，所以两块都必定通过短词 AI 的 title 列 GLOB 进入候选集。
+            # 差别只在正文：920 只有小写希腊 αα，921 有 ASCII 的 AI。
+            add_chunk(
+                connection,
+                chunk(
+                    "tulip_garden",
+                    920,
+                    "这块正文里只有小写希腊字母 αα 没有大写，也没有那个英文词。",
+                    title="AI 方向专题",
+                ),
+            )
+            add_chunk(
+                connection,
+                chunk(
+                    "tulip_garden",
+                    921,
+                    "这块正文里有 AI 关键词。",
+                    title="AI 方向专题",
+                ),
+            )
+            connection.commit()
+
+            # 单查大写希腊 ΑΑ：不得召回仅含小写 αα 的块。
+            greek_ids = {
+                row["chunk_id"] for row in search(connection, "ΑΑ", None, None, 50)
+            }
+            self.assertNotIn(
+                "tulip_garden-0920",
+                greek_ids,
+                "短词 ΑΑ 走 GLOB，不折希腊大小写，不得召回仅含 αα 的块",
+            )
+
+            rows_mixed = search(connection, "AI ΑΑ", None, None, 500)
+            mixed_ids = [row["chunk_id"] for row in rows_mixed]
+            # 无条件断言：两块都靠标题里的 AI 进了候选集，缺任何一块都是召回坏了。
+            self.assertIn("tulip_garden-0920", mixed_ids, "920 应通过标题里的 AI 进入候选")
+            self.assertIn("tulip_garden-0921", mixed_ids, "921 应通过标题里的 AI 进入候选")
+
+            by_id = {row["chunk_id"]: row for row in rows_mixed}
+            prepared = folded_terms(tuple(terms_from_query("AI ΑΑ")))
+            self.assertEqual(len(prepared), 2, "AI 与 ΑΑ 是两个不同的检索词")
+            folds_920 = FieldFolds(by_id["tulip_garden-0920"])
+            folds_921 = FieldFolds(by_id["tulip_garden-0921"])
+
+            # 920 的正文只有小写 αα，不得因此拿到大写 ΑΑ 的 prose_hit。
+            self.assertEqual(
+                prose_hit(folds_920, prepared),
+                0,
+                "正文只含小写 αα，不得获得大写 ΑΑ 的 prose_hit",
+            )
+            # 也不得成为第二个 matched term——它只命中 AI（标题），共 1 个。
+            self.assertEqual(
+                matched_term_count(folds_920, prepared),
+                1,
+                "小写 αα 不得算作大写 ΑΑ 的命中，920 只命中标题里的 AI",
+            )
+            # 921 正文真含 AI，拿到 prose_hit=1。
+            self.assertEqual(prose_hit(folds_921, prepared), 1)
+            self.assertEqual(matched_term_count(folds_921, prepared), 1)
+            # 第 1 层（正文命中）决出顺序：921 在前。
+            self.assertLess(
+                mixed_ids.index("tulip_garden-0921"),
+                mixed_ids.index("tulip_garden-0920"),
+                "正文真含 AI 的 921 必须排在仅标题命中的 920 之前",
+            )
+        finally:
+            connection.close()
+
+    def test_long_term_scoring_folds_like_fts_match(self):
+        """**长词**的评分口径必须与它的召回路径（MATCH）一致：按 Unicode 折叠。
+
+        这是上一条的镜像，两条合起来才说明"口径按词长分流"不是随口一说。三字及以上的词
+        走 ``MATCH``，而 trigram 按 Unicode 折叠——实测 ``MATCH '"ΑΑΑ"'`` **确实**同时
+        命中含 ``ΑΑΑ`` 和含 ``ααα`` 的块。
+
+        召回既然把 ``ααα`` 块放进来了，评分就必须承认那是正文命中。若长词也只折 ASCII，
+        该块的 prose_hit 会是 0，被判成"仅标题命中"、压到真·仅标题块后面——召回宽、
+        评分窄，同一次查询里两套口径，结果比两边都窄更难解释。
+        """
+        connection = build_fixture()
+        try:
+            # 950：正文含小写 ααα，标题不含。
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 950, "这块正文里有小写希腊 ααα 三连，标题不含。"),
+            )
+            # 951：正文不含，只有标题含大写 ΑΑΑ。
+            add_chunk(
+                connection,
+                chunk(
+                    "tulip_garden",
+                    951,
+                    "这块正文讲的是别的事情，完全不含那个三连字母。",
+                    title="ΑΑΑ 专题整理",
+                ),
+            )
+            connection.commit()
+
+            rows = search(connection, "ΑΑΑ", None, None, 500)
+            ids = [row["chunk_id"] for row in rows]
+            # 无条件断言：MATCH 按 Unicode 折叠，两块都必须被召回。
+            self.assertIn("tulip_garden-0950", ids, "MATCH 折叠 Unicode，应召回正文含 ααα 的块")
+            self.assertIn("tulip_garden-0951", ids, "标题含大写 ΑΑΑ 的块同样应被召回")
+
+            by_id = {row["chunk_id"]: row for row in rows}
+            prepared = folded_terms(tuple(terms_from_query("ΑΑΑ")))
+            folds_950 = FieldFolds(by_id["tulip_garden-0950"])
+            folds_951 = FieldFolds(by_id["tulip_garden-0951"])
+
+            self.assertEqual(
+                prose_hit(folds_950, prepared),
+                1,
+                "MATCH 召回了它，评分就必须承认正文含 ααα 是命中",
+            )
+            self.assertEqual(matched_term_count(folds_950, prepared), 1)
+            self.assertEqual(prose_hit(folds_951, prepared), 0, "951 正文不含，只有标题含")
+            self.assertEqual(matched_term_count(folds_951, prepared), 1)
+            self.assertLess(
+                ids.index("tulip_garden-0950"),
+                ids.index("tulip_garden-0951"),
+                "正文命中（含 ααα）必须排在仅标题命中（含 ΑΑΑ）之前",
+            )
+        finally:
+            connection.close()
+
+    def test_unicode_folding_matches_the_real_tokenizer(self):
+        """长词折叠必须与**真** trigram 分词器逐字符相同，基准现场问 FTS5 要。
+
+        这条钉的是 fold_unicode() 的正确性本身，不是它的后果。此前的实现是
+        ``str.lower()``，而它与 FTS5 不等价——分歧在四组字符上最集中，用户复审点名
+        要覆盖的就是这四组：
+
+        - ``Σ/σ/ς``：``lower()`` 对**词尾** ``Σ`` 走 Final_Sigma 折成 ``ς``，
+          所以 ``'ΣΣΣ'.lower()`` 是 ``'σσς'``，而 FTS5 折成 ``'σσσ'``。
+          **这是上下文相关的，逐字符测不出来**——单测 ``'Σ'.lower()`` 得到 ``'σ'``，
+          看着没问题。所以下面每组都测整串排列，不是单字符。
+        - ``S/s/ſ``：``ſ``（long s）FTS5 折成 ``s``，``lower()`` 原样留着（它本就小写）。
+        - ``ẞ/ß``：FTS5 把 ``ẞ`` 折成 ``ß``；``casefold()`` 展开成 ``ss``，长度都变了。
+          这是"别直接换 casefold" 的原因。
+        - ``İ/I/i/ı``：FTS5 不折 ``İ``；``lower()`` 把它拆成 ``i`` + U+0307 两个码点。
+
+        **基准不硬编码。** fts5_folded() 现场向内存 trigram 表要答案，所以换个 SQLite
+        版本时这条测试会指出真实差异，而不是拿旧版本的行为当圣经。
+        """
+        checked = 0
+        for name, group in FOLD_DIFF_GROUPS:
+            for combination in itertools.product(group, repeat=3):
+                word = "".join(combination)
+                for probe in (word, f"情绪{word}周期"):
+                    with self.subTest(group=name, probe=probe):
+                        self.assertEqual(
+                            fold_unicode(probe),
+                            fts5_folded(probe),
+                            f"{name}：折叠结果必须与真 tokenizer 相同",
+                        )
+                    checked += 1
+        self.assertEqual(checked, 252, "四组三字排列 × 两种上下文，覆盖数是钉死的")
+
+        # 反向钉住"为什么必须换掉 lower()/casefold()"：两者在这批例子上都有分歧，
+        # 所以上面那批断言不是恒真的。数字是实测值，不是估计。
+        divergent_lower = [
+            probe
+            for name, group in FOLD_DIFF_GROUPS
+            for combination in itertools.product(group, repeat=3)
+            for probe in ("".join(combination), f"情绪{''.join(combination)}周期")
+            if probe.lower() != fts5_folded(probe)
+        ]
+        divergent_casefold = [
+            probe
+            for name, group in FOLD_DIFF_GROUPS
+            for combination in itertools.product(group, repeat=3)
+            for probe in ("".join(combination), f"情绪{''.join(combination)}周期")
+            if probe.casefold() != fts5_folded(probe)
+        ]
+        self.assertEqual(len(divergent_lower), 158, "str.lower() 在这四组上的分歧数")
+        self.assertEqual(len(divergent_casefold), 90, "casefold() 在这四组上的分歧数")
+        self.assertIn("ΣΣΣ", divergent_lower, "ΣΣΣ 是 lower() 的分歧例（Final_Sigma）")
+        self.assertIn("ẞẞẞ", divergent_casefold, "ẞẞẞ 是 casefold() 的分歧例（展开成 ss）")
+
+        # 折叠表的两条性质，评分两侧都折的前提：1:1 单码点（不改变长度）、幂等。
+        for source, image in UNICODE_FOLD_TABLE.items():
+            with self.subTest(codepoint=f"U+{source:04X}"):
+                self.assertEqual(len(image), 1, "折叠必须是 1:1 单码点，否则长度会变")
+                self.assertEqual(fold_unicode(image), image, "折叠表的像必须是不动点")
+
+    def test_query_term_folding_survives_context_sensitive_lowercase(self):
+        """查询词自身不能被折错：``ΣΣΣ`` 召回的两个正文块必须拿到 prose_hit=1。
+
+        这是 str.lower() 那个缺陷的**端到端形态**，也是用户复审的第 1 点。FTS5 按自己的
+        折叠表建 gram，所以 ``MATCH '"ΣΣΣ"'`` 会召回正文写作 ``σσσ`` 和 ``ςςς`` 的块
+        （三者折叠后同为 ``σσσ``）。评分侧若用 ``str.lower()``，查询词会被折成 ``σσς``
+        （词尾 Σ 走 Final_Sigma），于是两个正文块的 ``prose_hit`` 全是 0，
+        被压到"仅标题命中"的块后面——**召回对了，排序反了**。
+
+        比 test_long_term_scoring_folds_like_fts_match 更强的地方在于：那条用的是
+        ``Α/α``，``lower()`` 恰好折对，所以它测的是"口径按词长分流"；这条用 sigma，
+        专门打 lower() 折错的那一处。
+        """
+        connection = build_fixture()
+        try:
+            # 960 / 961：正文分别写作 σσσ 和 ςςς，标题都不含。
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 960, "这块正文里有小写 σσσ 三连，标题不含。"),
+            )
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 961, "这块正文里有词尾式 ςςς 三连，标题不含。"),
+            )
+            # 962：正文与那三个字母无关，只有标题含大写 ΣΣΣ。
+            add_chunk(
+                connection,
+                chunk(
+                    "tulip_garden",
+                    962,
+                    "这块正文讲的是别的事情，完全不含那三个字母。",
+                    title="ΣΣΣ 专题整理",
+                ),
+            )
+            connection.commit()
+
+            rows = search(connection, "ΣΣΣ", None, None, 500)
+            ids = [row["chunk_id"] for row in rows]
+            # 无条件断言：FTS5 折叠了三种写法，三块都必须被召回。
+            for index in (960, 961, 962):
+                self.assertIn(
+                    f"tulip_garden-{index:04d}", ids, f"{index} 必须被 ΣΣΣ 召回"
+                )
+
+            by_id = {row["chunk_id"]: row for row in rows}
+            prepared = folded_terms(tuple(terms_from_query("ΣΣΣ")))
+            for index in (960, 961):
+                chunk_id = f"tulip_garden-{index:04d}"
+                folds = FieldFolds(by_id[chunk_id])
+                with self.subTest(prose_chunk=chunk_id):
+                    self.assertEqual(
+                        prose_hit(folds, prepared),
+                        1,
+                        "FTS5 召回了它，评分就必须承认正文命中——lower() 会给 0",
+                    )
+                    self.assertEqual(matched_term_count(folds, prepared), 1)
+                    self.assertLess(
+                        ids.index(chunk_id),
+                        ids.index("tulip_garden-0962"),
+                        "正文命中必须排在仅标题命中之前",
+                    )
+            title_only = FieldFolds(by_id["tulip_garden-0962"])
+            self.assertEqual(prose_hit(title_only, prepared), 0, "962 正文不含")
+            self.assertEqual(matched_term_count(title_only, prepared), 1)
+        finally:
+            connection.close()
+
+    def test_case_variants_of_a_long_term_dedup_to_one(self):
+        """``ΣΣΣ σσσ ςςς`` 必须去重成一个词，结果与顺序等同于单查 ``ΣΣΣ``。
+
+        用户复审的第 2 点。dedup_key() 按"折叠后是否相同"判等价，所以这条的成立完全
+        依赖 fold_unicode() 折得对：用 ``str.lower()`` 时三者折成 ``σσς``/``σσσ``/``ςςς``
+        三个不同的串，被当成 3 个词，matched_term_count 对同一个块给 1 而不该给的 3
+        混进第 2 层排序键——用户看到的是"多打了几遍同一个词的变体，结果就换了顺序"。
+
+        这是 ASCII 侧 ``AI ai Ai aI`` 那条等值断言的 Unicode 版本，缺了它，长词路径的
+        大小写等价就只有召回被测过、排序没有。
+        """
+        self.assertEqual(
+            terms_from_query("ΣΣΣ σσσ ςςς"),
+            ["ΣΣΣ"],
+            "三种写法折叠后相同、走同一条召回路径，必须算一个词",
+        )
+        connection = build_fixture()
+        try:
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 960, "这块正文里有小写 σσσ 三连，标题不含。"),
+            )
+            add_chunk(
+                connection,
+                chunk("tulip_garden", 961, "这块正文里有词尾式 ςςς 三连，标题不含。"),
+            )
+            add_chunk(
+                connection,
+                chunk(
+                    "tulip_garden",
+                    962,
+                    "这块正文讲的是别的事情，完全不含那三个字母。",
+                    title="ΣΣΣ 专题整理",
+                ),
+            )
+            connection.commit()
+
+            single = [row["chunk_id"] for row in search(connection, "ΣΣΣ", None, None, 500)]
+            for variants in ("ΣΣΣ σσσ ςςς", "σσσ ςςς ΣΣΣ", "ςςς ΣΣΣ σσσ ΣΣΣ"):
+                with self.subTest(query=variants):
+                    # 词表保留首次出现的原始写法，所以这里只断言结果，不断言词表内容。
+                    self.assertEqual(
+                        [row["chunk_id"] for row in search(connection, variants, None, None, 500)],
+                        single,
+                        "变体查询的结果与顺序必须与单查完全一致",
+                    )
+            # 反向钉住"不去重会失真"：三个词时第 2 层排序键会被撑到 3。
+            unduped = folded_terms(("ΣΣΣ", "σσσ", "ςςς"))
+            rows = {row["chunk_id"]: row for row in search(connection, "ΣΣΣ", None, None, 500)}
+            self.assertEqual(
+                matched_term_count(FieldFolds(rows["tulip_garden-0960"]), unduped),
+                3,
+                "这条记录的是未去重时的失真值，用来证明上面那条不是恒真",
+            )
+        finally:
+            connection.close()
+
+    def test_the_two_case_folding_kinds_are_split_by_term_length(self):
+        """折叠口径的分流依据是**词长**，不是"词里有没有非 ASCII 字符"。
+
+        上面两条测的是行为，这条钉实现层的分流规则：同样是希腊字母，两字的 ``ΑΑ`` 走
+        ASCII 口径（因为它走 GLOB），三字的 ``ΑΑΑ`` 走 Unicode 口径（因为它走 MATCH）。
+        看着像不一致，其实正是一致——口径跟着召回路径走，而路径按长度选。
+
+        阈值必须与 split_terms_by_length() 用的是同一个常量，否则某个长度的词会出现
+        "召回走 A 路径、评分用 B 口径"的错配。
+        """
+        self.assertEqual(fold_kind_for("ΑΑ"), ASCII_FOLD)
+        self.assertEqual(fold_kind_for("AI"), ASCII_FOLD)
+        self.assertEqual(fold_kind_for("竞价"), ASCII_FOLD)
+        self.assertEqual(fold_kind_for("ΑΑΑ"), UNICODE_FOLD)
+        self.assertEqual(fold_kind_for("弱转强"), UNICODE_FOLD)
+        self.assertEqual(fold_kind_for("AI硬件"), UNICODE_FOLD)
+        # 阈值与召回分流同源：恰好 MATCH_MIN_LENGTH 长的词归 Unicode，短一个字符归 ASCII。
+        boundary = "Α" * MATCH_MIN_LENGTH
+        self.assertEqual(fold_kind_for(boundary), UNICODE_FOLD)
+        self.assertEqual(fold_kind_for(boundary[:-1]), ASCII_FOLD)
+        long_terms, short_terms = split_terms_by_length([boundary, boundary[:-1]])
+        self.assertEqual(long_terms, [boundary], "归 Unicode 口径的词必须正是走 MATCH 的那批")
+        self.assertEqual(short_terms, [boundary[:-1]], "归 ASCII 口径的词必须正是走 GLOB 的那批")
+
+    def test_ascii_folding_is_not_skipped_for_already_lowercase_terms(self):
+        """跳过字段折叠的判据是"词里有没有带大小写的字符"，不是"词折叠前后是否相同"。
+
+        性能修复引入了一条快捷路径：词在该口径下不含带大小写的字符时（``竞价``、
+        ``弱转强`` 这类纯汉字词），字段就不折了，直接在原文上搜。这条路径的判据很容易
+        写错成"折叠后与原词相同就跳过"——那样 ``ai``、``Ai`` 折叠前后都含小写、被判成
+        不用折，于是搜不到写作 ``AI硬件`` 的块，四写法等值当场破掉。
+
+        所以这里三样都钉：判据本身、它在**评分层**的后果、四种写法结果逐条相同。
+
+        **只断言召回集合是抓不到这个 bug 的。** needs_fold 只作用在 Python 侧评分，
+        召回由 SQL 的 ``GLOB '*[Aa][Ii]*'`` 算——四种写法经 glob_pattern() 生成的是
+        **同一个模式**，判据写错时召回一条不少，坏掉的是那批块的 prose_hit 和
+        matched_term_count，也就是排序。所以主体断言落在评分函数上。
+        """
+        # 一、判据本身：折叠后的词里有字符是"别的写法的折叠目标"就得折，与"这个写法
+        # 要不要改"无关。判据收的是**折叠后的形式**（见 needs_cased_fold()）。
+        self.assertTrue(needs_cased_fold("ai", ASCII_FOLD), "ai 含 ASCII 字母，字段必须折")
+        self.assertTrue(needs_cased_fold(fold("AI", ASCII_FOLD), ASCII_FOLD))
+        self.assertFalse(needs_cased_fold("竞价", ASCII_FOLD), "纯汉字词可以跳过字段折叠")
+        self.assertFalse(needs_cased_fold("弱转强", UNICODE_FOLD))
+        # 希腊字母在 ASCII 口径下不算"有别的写法"（GLOB 不折它），在 Unicode 口径下算。
+        self.assertFalse(needs_cased_fold("ΑΑ", ASCII_FOLD))
+        self.assertTrue(needs_cased_fold(fold("ΑΑΑ", UNICODE_FOLD), UNICODE_FOLD))
+        # 判据必须收折叠后的形式，不能收原词。大写 Σ 不是任何字符的折叠目标，
+        # 拿原词查像集合会把 ΣΣΣ 判成"不用折"，于是正文写作 ςςς 的块搜不到。
+        self.assertTrue(
+            needs_cased_fold(fold("ΣΣΣ", UNICODE_FOLD), UNICODE_FOLD),
+            "ΣΣΣ 折叠后是 σσσ，σ 是 Σ/ς 的折叠目标，字段必须折",
+        )
+        self.assertTrue(FoldedTerm("ΣΣΣ").needs_fold, "FoldedTerm 必须传折叠后的形式给判据")
+
+        connection = build_case_fixture()
+        try:
+            # 二、评分层：拿**全小写**的 ai 去评分，正文写作 AI / Ai / aI 的块也必须算
+            # 正文命中。判据错写成"折叠前后是否相同"时，ai 被判成不用折，这几条全变 0。
+            lowercase = folded_terms(("ai",))
+            rows = {
+                row["chunk_id"]: row
+                for row in search(connection, "ai", None, None, 500)
+            }
+            for index, form in enumerate(CASE_FORMS, start=1):
+                chunk_id = f"{CASE_SOURCE}-{index:04d}"
+                with self.subTest(prose_written_as=form):
+                    self.assertIn(chunk_id, rows, f"正文写作 {form} 的块必须被 ai 召回")
+                    folds = FieldFolds(rows[chunk_id])
+                    self.assertEqual(
+                        prose_hit(folds, lowercase), 1, f"小写 ai 必须认出正文里的 {form}"
+                    )
+                    self.assertEqual(matched_term_count(folds, lowercase), 1)
+            # 折叠对 title / author 列同样生效，不只是 text。
+            for chunk_id, column, written in (
+                (f"{CASE_SOURCE}-0010", "title", "AI方向专题"),
+                (f"{CASE_SOURCE}-0020", "author", "Ai研究员"),
+            ):
+                with self.subTest(column=column):
+                    folds = FieldFolds(rows[chunk_id])
+                    self.assertEqual(prose_hit(folds, lowercase), 0, "这两块正文都不含该词")
+                    self.assertEqual(
+                        matched_term_count(folds, lowercase),
+                        1,
+                        f"小写 ai 必须认出 {column} 列里的 {written}",
+                    )
+            # 三、可观察后果：四种写法的结果逐条相同，顺序也相同。
+            ordering = {
+                form: [row["chunk_id"] for row in search(connection, form, None, None, 500)]
+                for form in CASE_FORMS
+            }
+            self.assertGreater(
+                len(ordering[CASE_FORMS[0]]), 1, "候选必须多于一条，否则顺序断言是空转的"
+            )
+            for form in CASE_FORMS[1:]:
+                with self.subTest(form=form):
+                    self.assertEqual(
+                        ordering[form],
+                        ordering[CASE_FORMS[0]],
+                        "四种写法必须返回逐条相同、顺序相同的结果",
+                    )
+        finally:
+            connection.close()
+
+    def test_chunk_type_bonus_is_documented_as_a_ranking_factor(self):
+        """CHUNK_TYPE_BONUS 不能隐藏在"字段命中分"里。
+
+        curated_method +5、conflict +2 是实际排序因素。
+        给出一个字段命中相同、chunk_type 不同的反例测试。
+        """
+        connection = build_fixture()
+        try:
+            # 两块正文完全相同，字段命中分相同，只有 chunk_type 不同
+            add_chunk(
+                connection,
+                chunk(
+                    "tulip_garden",
+                    930,
+                    "正文只提一次竞价。",
+                    chunk_type="article",
+                ),
+            )
+            add_chunk(
+                connection,
+                chunk(
+                    "tulip_garden",
+                    931,
+                    "正文只提一次竞价。",
+                    chunk_type="curated_method",
+                ),
+            )
+            connection.commit()
+
+            order = [row["chunk_id"] for row in search(connection, "竞价", None, None, 500)]
+            self.assertLess(
+                order.index("tulip_garden-0931"),
+                order.index("tulip_garden-0930"),
+                "curated_method 必须排在 article 之前（+5.0 加成）",
+            )
+        finally:
+            connection.close()
 
     # --- 混合与多词查询 ---
 
@@ -955,7 +1789,7 @@ class RetrievalContractTests(unittest.TestCase):
         #
         # 这里改查"两个词各自独有的命中都真的进了召回"：竞价独有 165 条、情绪独有
         # 30 条、交集 0，所以任一词被丢掉都会让对应那一侧变成空集。排序那一半由
-        # SourceCoverageTests 里唯一保留的阶段 3 expectedFailure 负责。
+        # SourceCoverageTests 里阶段 3 的普通排序断言负责。
         rows = self.search(f"竞价 {SECOND_TERM}", limit=500)
         got = {row["chunk_id"] for row in rows}
         first_only = recall_target_ids(self.connection, "竞价") - recall_target_ids(
@@ -1793,6 +2627,67 @@ class RealIndexTests(unittest.TestCase):
                 rows = self.in_scope(search(self.connection, term, None, None, 8))
                 self.assertTrue(rows)
                 self.assertTrue({row["chunk_id"] for row in rows} <= self.recall_target_ids(term))
+
+    def test_prose_matches_outrank_title_only_matches_on_the_real_corpus(self):
+        # SPEC 3.1 阶段 3 验收表第一行的真库版，也是 fixture 侧同名断言的对照。
+        # 那一行是**防退化项**：阶段 2 实测前 8 条已经全是正文真含（样本口径 8/8，
+        # 『打板』7/7，第 8 条来自样本外的 panfeng），阶段 3 把 topics 权重降下去、
+        # 把正文命中提到第一层，都有可能反过来伤到精度，所以必须每次复测。
+        #
+        # 阶段 3 实测：五个词在样本口径下全部 8/8（『打板』由 7/7 变 8/8——正文优先层
+        # 把原先那条样本外的 title 命中挤了下去）。断言写成"全部正文真含"而不是写死
+        # 比例，比例会随语料变。
+        for term in RECALL_DEFECT_TERMS + ("筹码",):
+            with self.subTest(term=term):
+                rows = self.in_scope(search(self.connection, term, None, None, 8))
+                self.assertEqual(len(rows), 8)
+                self.assertTrue(all(term in row["text"] for row in rows))
+
+    def test_repeated_queries_are_identical_on_the_real_corpus(self):
+        # SPEC 3.1 阶段 3 验收表第三行：同一查询连续两次结果逐条完全相等。
+        # 真库上单独测一遍而不只靠 fixture：内存表复现不了 bm25 的分数分布，而阶段 3
+        # 恰好把 bm25 从排序里摘掉了，所以"顺序是否仍然稳定"要在真数据上验。
+        for term in ("竞价", "弱转强", "情绪周期", f"竞价 {SECOND_TERM}"):
+            with self.subTest(term=term):
+                first = [row["chunk_id"] for row in search(self.connection, term, None, None, 8)]
+                second = [row["chunk_id"] for row in search(self.connection, term, None, None, 8)]
+                self.assertEqual(len(first), 8)
+                self.assertEqual(first, second)
+
+    def test_limit_prefix_is_stable_on_the_real_corpus(self):
+        # SPEC 3.1 阶段 3 验收表第四行：--limit 8 与 --limit 40 的前 8 条完全相同。
+        # 覆盖三条路径：长词走 MATCH、短词走 GLOB、混合查询两条都走。
+        for term in ("竞价", "弱转强", "竞价 弱转强"):
+            with self.subTest(term=term):
+                short = [row["chunk_id"] for row in search(self.connection, term, None, None, 8)]
+                long = [row["chunk_id"] for row in search(self.connection, term, None, None, 40)]
+                self.assertEqual(len(short), 8)
+                self.assertEqual(long[:8], short)
+
+    def test_source_filter_still_narrows_the_ranked_results(self):
+        # SPEC 3.1 阶段 3 验收表第五行：--source tulip_garden 仍只返回该来源。
+        # 排序层改动不该碰过滤器，但两者都在 search() 里，所以一起复测。
+        for term in ("竞价", "筹码断层"):
+            with self.subTest(term=term):
+                rows = search(self.connection, term, "tulip_garden", None, 8)
+                self.assertTrue(rows)
+                self.assertEqual(set(sources_of(rows)), {"tulip_garden"})
+
+    def test_ties_are_broken_by_chunk_id_on_the_real_corpus(self):
+        # SPEC 2.2 确定性层的真库断言：前三层键相等的块之间按 chunk_id 升序。
+        # fixture 侧用反序重建库来证明不依赖 rowid；真库是只读的，改为直接检查输出——
+        # 相邻两条只要前三层键相同，chunk_id 就必须递增。
+        found_tie = False
+        for term in ("竞价", "情绪", "弱转强"):
+            rows = search(self.connection, term, None, None, 200)
+            for previous, current in zip(rows, rows[1:]):
+                previous_key = ranking_key(previous, [term])
+                current_key = ranking_key(current, [term])
+                if previous_key[:3] == current_key[:3]:
+                    found_tie = True
+                    with self.subTest(term=term, pair=(previous["chunk_id"], current["chunk_id"])):
+                        self.assertLess(previous["chunk_id"], current["chunk_id"])
+        self.assertTrue(found_tie, "真库结果里没有并列，这条断言测不到决胜层")
 
     def sample_holders_of(self, term: str) -> dict[str, int]:
         """Which regression-sample sources hold a three-field match, and how many each."""
