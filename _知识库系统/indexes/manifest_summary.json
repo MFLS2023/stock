@@ -1,17 +1,18 @@
 {
-  "generated_at": "2026-08-02T07:12:15.730662+00:00",
+  "generated_at": "2026-08-04T07:40:55.505625+00:00",
   "project_root": "C:\\Users\\20577\\Documents\\炒股\\知识库",
-  "total_files": 530,
+  "total_files": 3194,
   "source_counts": {
     "fulibei": 110,
     "nanjinglu_bian": 42,
     "tulip_garden": 377,
-    "panfeng": 1
+    "panfeng": 1,
+    "aizaibingchuan": 2664
   },
   "changes": {
-    "new": 0,
+    "new": 71,
     "changed": 0,
-    "unchanged": 530,
+    "unchanged": 3123,
     "removed": 0
   },
   "removed": []

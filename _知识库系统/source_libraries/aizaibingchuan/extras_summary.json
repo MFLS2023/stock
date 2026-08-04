@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-08-04T07:40:41+00:00",
+  "source_root": "C:\\Users\\20577\\Documents\\炒股\\知识库\\爱在冰川\\额外资料",
+  "files": 9,
+  "documents": 9,
+  "parents": 49,
+  "chunks": 49,
+  "chunk_characters": 48455,
+  "chunk_types": {
+    "curated_digest": 36,
+    "course_ocr": 13
+  },
+  "confidence": {
+    "medium": 36,
+    "low": 13
+  },
+  "per_file": [
+    {
+      "file": "2023-06-22 爱在冰川文章干货点-1.pdf",
+      "chunks": 4,
+      "chars": 4053,
+      "detail": "条目 21 个 / 24 页"
+    },
+    {
+      "file": "2023-07-29 爱在冰川文章干货点2.pdf",
+      "chunks": 4,
+      "chars": 4040,
+      "detail": "条目 16 个 / 35 页"
+    },
+    {
+      "file": "2023-08-18 爱在冰川文章干货点-3.pdf",
+      "chunks": 4,
+      "chars": 4341,
+      "detail": "条目 18 个 / 30 页"
+    },
+    {
+      "file": "2023-09-06 爱在冰川小号文章及留言评论区.pdf",
+      "chunks": 1,
+      "chars": 1139,
+      "detail": "条目 8 个 / 17 页"
+    },
+    {
+      "file": "2023-09-09 爱在冰川干货点文章-4.pdf",
+      "chunks": 5,
+      "chars": 5030,
+      "detail": "条目 14 个 / 29 页"
+    },
+    {
+      "file": "2023-09-17 爱在冰川干货点文章-5.pdf",
+      "chunks": 7,
+      "chars": 6184,
+      "detail": "条目 17 个 / 41 页"
+    },
+    {
+      "file": "2023-10-13 爱在冰川干货点文章-6.pdf",
+      "chunks": 6,
+      "chars": 5920,
+      "detail": "条目 16 个 / 18 页"
+    },
+    {
+      "file": "12爱在冰川高送转战法.pdf",
+      "chunks": 13,
+      "chars": 12284,
+      "detail": "OCR 可用 23/24 页，剔除图表页 1"
+    },
+    {
+      "file": "爱在冰川语录感悟.docx",
+      "chunks": 5,
+      "chars": 5464,
+      "detail": "段落 133 个"
+    }
+  ]
+}

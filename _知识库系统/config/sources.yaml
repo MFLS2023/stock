@@ -64,3 +64,28 @@ sources:
     complexity_signals:
       - 连续消息继承发言人，日期需由绝对日期锚点和组内时间回绕重建
     notes: 飞书HTML连续消息导出；保留发言人、重建交易日日期、继承unknown时间，并按消息编号引用。
+
+  # 微信公众号导出。通用导入器的 clean_text 对这批 .md 只压缩 1.1%，图片语法和
+  # URL 会整片留在正文里（实测抽样 300 篇残留 37642 处），所以走专用适配器。
+  # 留言区平均占全文 73%：读者留言丢弃，作者本人回复提成 qa_reply 块。
+  - id: aizaibingchuan
+    display_name: 爱在冰川
+    source_path: 爱在冰川
+    source_type: wechat_official_markdown
+    status: integrated
+    approved_on: '2026-08-04'
+    original_policy: read_only
+    primary_locator: paragraph_section
+    pipeline: wechat_markdown_with_comment_replies
+    adapter: specialized_aizaibingchuan
+    author: 爱在冰川
+    # 2026-08-04 增量：用户补下载 2023 三季度缺失的 .md，按同一套规则筛出 71 篇入库，
+    # 2584 -> 2655。另有 9 篇第三方 PDF/docx 汇编在 爱在冰川\额外资料\，
+    # 由 import_azbc_extras.py 单独导入，不计入这里的 .md 计数。
+    format_counts:
+      .md: 2655
+    review_required: false
+    complexity_signals:
+      - 微信样板与图片链接占原文约 77%，需专用清洗
+      - 留言区占全文约 73%，须区分读者留言与作者回复
+    notes: 微信公众号导出 Markdown；已剔除资讯汇总与短线资金流，图片未 OCR，图表内容需回看原文。

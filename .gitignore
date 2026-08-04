@@ -11,12 +11,21 @@
 南京路彼岸/
 郁金香花园付费文章文档版/
 飞书聊天记录_潘凤/
+爱在冰川/
 
 # --- 二进制索引（48M，每次重建全量变化）---
 # 回滚依赖 backups/ 下的物理备份，不依赖 Git
 _知识库系统/indexes/*.db
 _知识库系统/indexes/*.db-shm
 _知识库系统/indexes/*.db-wal
+# 导入前的库快照（如 knowledge.db.backup-before-azbc，44M），只留本机
+_知识库系统/indexes/*.db.backup-*
+
+# --- 导入前的 jsonl 快照（每次导入都会生成，爱在冰川一家就 61M）---
+# 命名形如 chunks.jsonl.bak-before-extras / parents.jsonl.bak-before-delta-2023q3
+# 与 .db.backup-* 同理：回滚靠本机文件，不靠 Git
+_知识库系统/source_libraries/*/*.jsonl.bak-*
+_知识库系统/source_libraries/*/*.jsonl.bak
 
 # --- 可由原始资料重新生成的大件 ---
 _知识库系统/source_libraries/*/assets/
@@ -25,6 +34,10 @@ _知识库系统/source_libraries/*/image_ocr_cache/
 
 # --- 临时与调试产物 ---
 _知识库系统/tmp/
+# akshare 接口探测草稿（判断哪些第三方接口可用时的临时脚本，非项目产物）
+_知识库系统/scripts/_ak.txt
+_知识库系统/scripts/_ak1.py
+_知识库系统/scripts/_ak_probe.py
 **/__pycache__/
 *.pyc
 *.pyo

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T11:30:34.287128+00:00",
+  "generated_at": "2026-08-04T07:41:27.429605+00:00",
   "passed": 11,
   "total": 11,
   "success": true,
@@ -12,22 +12,22 @@
     {
       "name": "来源登记",
       "passed": true,
-      "detail": "登记来源数=4"
+      "detail": "登记来源数=5"
     },
     {
       "name": "文件 manifest",
       "passed": true,
-      "detail": "记录数=530"
+      "detail": "记录数=3194"
     },
     {
       "name": "全部来源内容入库",
       "passed": true,
-      "detail": "{\"fulibei\": {\"documents\": 110, \"parents\": 441, \"chunks\": 1444}, \"nanjinglu_bian\": {\"documents\": 42, \"parents\": 80, \"chunks\": 525}, \"tulip_garden\": {\"documents\": 42, \"parents\": 155, \"chunks\": 1181}, \"panfeng\": {\"documents\": 29, \"parents\": 60, \"chunks\": 186}}"
+      "detail": "{\"fulibei\": {\"documents\": 110, \"parents\": 441, \"chunks\": 1444}, \"nanjinglu_bian\": {\"documents\": 42, \"parents\": 80, \"chunks\": 525}, \"tulip_garden\": {\"documents\": 42, \"parents\": 155, \"chunks\": 1181}, \"panfeng\": {\"documents\": 29, \"parents\": 60, \"chunks\": 186}, \"aizaibingchuan\": {\"documents\": 2537, \"parents\": 5184, \"chunks\": 5813}}"
     },
     {
       "name": "统一检索块",
       "passed": true,
-      "detail": "块数=3336"
+      "detail": "块数=9149"
     },
     {
       "name": "检索块字段",
@@ -47,12 +47,12 @@
     {
       "name": "索引记录数一致",
       "passed": true,
-      "detail": "SQLite={\"documents\": 223, \"parents\": 736, \"chunks\": 3362} JSONL={\"documents\": 223, \"parents\": 736, \"chunks\": 3362}"
+      "detail": "SQLite={\"documents\": 2760, \"parents\": 5920, \"chunks\": 9175} JSONL={\"documents\": 2760, \"parents\": 5920, \"chunks\": 9175}"
     },
     {
       "name": "样例检索",
       "passed": true,
-      "detail": "{\"情绪周期\": 516, \"仓位 回撤\": 498, \"92科比\": 88, \"筹码\": 422, \"弱转强\": 111}"
+      "detail": "{\"情绪周期\": 632, \"仓位 回撤\": 1358, \"92科比\": 91, \"筹码\": 772, \"弱转强\": 287}"
     },
     {
       "name": "项目 Skills",
