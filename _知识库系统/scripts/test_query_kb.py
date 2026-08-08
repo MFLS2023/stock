@@ -83,6 +83,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import yaml
+
+import query_kb  # 同义词扩展的测试要改模块级常量，需要模块对象本身
 from build_index import add_chunk, create_schema
 from query_kb import (
     ASCII_FOLD,
@@ -1854,6 +1857,50 @@ class RetrievalContractTests(unittest.TestCase):
     def test_limit_zero_and_one_are_honoured(self):
         self.assertEqual(self.search("弱转强", limit=0), [])
         self.assertEqual(len(self.search("弱转强", limit=1)), 1)
+
+    # --- 同义词扩展（--expand）---------------------------------------------
+    # 扩展做在查询字符串层，不进 search()：检索层的召回与排序合同已被本文件钉死，
+    # 动它要重测全部基线。这几条守的是「扩展只加词、不替换、不误伤」。
+
+    def test_expand_adds_group_variants(self):
+        expanded, added = query_kb.expand_query("弱转强")
+        self.assertIn("转势", added, "同组写法应被加进来")
+        self.assertTrue(expanded.startswith("弱转强"), "原词必须保留在最前")
+
+    def test_expand_never_drops_the_original_term(self):
+        # 硬规则：只加词不替换。`转势` 在复利杯零命中，拿它顶替 `弱转强`
+        # 会把该来源的全部相关内容丢掉。
+        for term in ("弱转强", "龙头", "竞价", "仓位"):
+            with self.subTest(term=term):
+                expanded, _ = query_kb.expand_query(term)
+                self.assertIn(term, query_kb.terms_from_query(expanded))
+
+    def test_expand_is_a_noop_for_unknown_terms(self):
+        expanded, added = query_kb.expand_query("这个词表里没有")
+        self.assertEqual(added, [])
+        self.assertEqual(expanded, "这个词表里没有")
+
+    def test_expand_does_not_introduce_dead_terms(self):
+        # dead_terms 是实测全库零命中的词，扩展它们是空动作，只会拖慢查询。
+        config = yaml.safe_load(query_kb.SYNONYMS_CONFIG.read_text(encoding="utf-8"))
+        dead = set(config.get("dead_terms") or [])
+        self.assertTrue(dead, "配置里应留有 dead_terms 记录，避免重复踩坑")
+        for group in (config.get("groups") or {}).values():
+            pool = [group.get("canonical", "")] + list(group.get("variants") or [])
+            for word in pool:
+                with self.subTest(word=word):
+                    self.assertNotIn(word, dead)
+
+    def test_expand_survives_a_missing_config(self):
+        # 同义词是增强不是硬依赖：配置文件读不到时必须静默退化，不能让检索报错。
+        original = query_kb.SYNONYMS_CONFIG
+        try:
+            query_kb.SYNONYMS_CONFIG = original.with_name("does-not-exist.yaml")
+            expanded, added = query_kb.expand_query("弱转强")
+            self.assertEqual(added, [])
+            self.assertEqual(expanded, "弱转强")
+        finally:
+            query_kb.SYNONYMS_CONFIG = original
 
 
 class GlobEscapingTests(unittest.TestCase):

@@ -21,8 +21,48 @@ MATCH_MIN_LENGTH = 3
 
 # 召回字段：人写的三列。topics 由 infer_topics() 按关键词计数自动打，标签文本本身
 # 从不出现在正文里，阶段 1 已把它移出 FTS 可匹配列，召回同样不带它（SPEC 2.2）。
-# 顺序无所谓——三列各自 GLOB 后取并集。
+# 顺序无所谓——三列在同一次扫描里 OR 起来。
 RECALL_COLUMNS = ("text", "title", "author")
+
+# 短词召回：**查 chunks 表、三列一次扫完**，不查 chunks_fts、不拆成三条 UNION。
+#
+# 这是 glob_fold_ascii_case() 里那句预告（"新增来源之前必须重新做大语料性能验收"）
+# 到期后的实测结论。爱在冰川接入把语料从 3362 块推到 9175 块，短词路径本就是线性扫描，
+# 耗时按比例涨上来了，于是两处开销同时暴露：
+#
+# 1. **查 chunks_fts 比查 chunks 贵。** FTS5 的内容表按段压缩存放，扫它要一路解压；
+#    chunks 是普通 b-tree，直接顺序读。而短词模式（``*[Aa][Ii]*``、``*龙头*``）凑不出
+#    可用的 gram，两边都是全表扫，走 FTS 白付解压成本却换不到索引。
+# 2. **三条 UNION 子查询就是扫三遍。** text/title/author 各一条，每条独立扫全表，
+#    而三列在同一行上，一次扫描全都读到了。
+#
+# 真库 9175 块实测（min of 7，2026-08-04）：
+#
+# ==========  ======================  ======================  ========
+# 词          现状 IN(fts5 三列 UNION)  改法 IN(chunks 单扫 OR)   提速
+# ==========  ======================  ======================  ========
+# ``龙头``     159.3ms                 95.6ms                  1.7x
+# ``竞价``     163.7ms                 119.3ms                 1.4x
+# ``板块``     188.4ms                 119.3ms                 1.6x
+# ``低吸``     138.3ms                 86.9ms                  1.6x
+# ``AI``      175.7ms                 119.2ms                  1.5x
+# ==========  ======================  ======================  ========
+#
+# 混合查询（长词 MATCH + 短词 GLOB）同样受益：``龙头 竞价 弱转强`` 294.0 → 180.1ms。
+#
+# **等价性是改法的前提，已逐词验收**：139 个词（两字常用词、同义词表全量、ASCII 大小写
+# 四写法、希腊 ``ΑΑΑ``/``ααα``/``ΣΣΣ``、全角 ``ＡＡＡ``、GLOB 元字符 ``*``/``?``/``[``
+# 及其组合、只在 title 或 author 出现的词、单字、标点、空串）逐词比对两种写法的
+# chunk_id 集合，**不同的 0 个**。地基也验了：两表 9175 行、chunk_id 集合相同，
+# ``text``/``title``/``author`` 三列逐行不一致 0 行。
+#
+# 为什么保留 ``IN (...)`` 外套而不直接 ``WHERE (text GLOB ? OR ...)``：后者在单短词时
+# 更快一点（``龙头`` 72.1ms），但混合查询仍要 UNION 结构，而"过滤器只在最外层套一次"
+# 是 build_filters() 那条注释在意的性质——拆开写就可能漏在某条路径上。这里只把三条
+# 子查询合成一条、把表换掉，结构不动。
+SHORT_TERM_RECALL_SQL = "SELECT chunk_id FROM chunks WHERE " + " OR ".join(
+    f"{column} GLOB ?" for column in RECALL_COLUMNS
+)
 
 # 排序全部在 Python 侧由 ranking_key() 完成，SQL 不再产生任何分数，所以 rank 是个
 # 纯占位列。
@@ -564,42 +604,49 @@ def matched_term_count(folds: FieldFolds, terms: tuple[FoldedTerm, ...]) -> int:
 def ranking_key(row: sqlite3.Row, terms: list[str]) -> tuple:
     """SPEC 2.2 排序契约，两条路径共用的唯一标尺。
 
-    四层，逐层决胜，前一层相等才看下一层：
+    五层，逐层决胜，前一层相等才看下一层：
 
     1. **正文命中优先**（prose_hit）——正文真含词的块排在仅标题/仅作者含词的块之前。
     2. **多词命中数**（matched_term_count）——命中的不同检索词越多越前。
     3. **字段加权命中分**（field_hit_score）——``text`` ≥ ``title`` > ``topics``。
-    4. **chunk_id 升序**——决胜字段，消除并列时的顺序不确定性。
+    4. **日期降序**——前三层相等时，更新的内容在前；空日期排末。实现：把 "YYYY-MM-DD"
+       去掉连字符转整数再取负（如 "2024-08-04" → 20240804 → -20240804），空日期/None
+       用整数 0，排序后 0 > 任何负整数，故空日期自然落末。
+    5. **chunk_id 升序**——最终决胜，消除仍然并列时的顺序不确定性。
 
     分层而不是加权求和，因为这三个性质不可互换：一个标题里刷了三次该词的块不该因为
     分数够高就越过正文块，一个高频单词块也不该越过双词命中块。加权求和总能被"多刷
     几次命中"抵消掉，分层不会。
 
-    **bm25 不再参与排序。** 阶段 2 是两条路径两把尺子：全长词走 ``MATCH`` 用
-    ``ORDER BY bm25``，出现短词就走 GLOB 并集用 relevance()。bm25 是负值、尺度与
-    relevance() 不同，同一次查询里混用等于凭空发明换算规则（SPEC 2.2 把定义换算规则
-    列为阶段 3 的活）。这里给出的换算规则是：**不换算，两条路径都用这一个键**。
-    理由是 bm25 无法表达上面第 1 层——它按词频与文档长度打分，看不出命中落在正文
-    还是标题，而"正文优先"正是本阶段要保证的性质。代价是长词查询失去了 bm25 的
-    文档长度归一化，换来的是两条路径行为一致、且可枚举核对。
+    加第 4 层的原因：``FIELD_CAPS`` 封顶导致高频词大量块并列（实测"赚钱效应"有 1759
+    块前三层同分），此时第 5 层 chunk_id 字典序让 ``azbc-`` 前缀的爱在冰川系统性靠前。
+    加入日期降序后，并列块里时间更近的内容优先，行为更符合用户预期；爱在冰川不再
+    因字母序占优，而是靠内容日期竞争。
 
-    第 4 层是确定性的来源。前三层都是"内容属性"，同一批数据上必然并列（fixture 里
-    5 条 author-only 块的前三层完全相同），此前靠 SQLite 返回的 rowid 顺序兜着——
-    rowid 在同一个库里稳定，但重建索引后会变，而 chunk_id 不会。sorted() 是稳定排序，
-    加了这一层之后前三层的并列不再依赖输入顺序。
+    **bm25 不再参与排序。** 见阶段 3 注释（原文保留在 git 历史）。
 
-    返回的元组前三项取负号：sorted() 升序排列，取负让"分高的在前"，而 chunk_id
-    保持正序（字典序升序）。不用 ``reverse=True``，那样 chunk_id 会跟着倒过来。
+    第 5 层是确定性的来源。前四层都可能出现真正的并列（同一天的多个块），
+    chunk_id 不变，sorted() 稳定排序保证结果确定。
+
+    返回的元组前三项和第四项取负号：sorted() 升序排列，取负让"分高/日期新的在前"，
+    第 5 层 chunk_id 保持正序（字典序升序）。
 
     ``terms`` 收 ``list[str]``（调用方和测试都这么传），内部转成 FoldedTerm 元组并
     按词表缓存；一行的字段折叠由 FieldFolds 在三个评分层之间共享，见各自的文档。
     """
     prepared = folded_terms(tuple(terms))
     folds = FieldFolds(row)
+    # 日期层：把 "YYYY-MM-DD" 去掉连字符转整数再取负；非日期字符串/"未知"/空值用 0（排末）
+    raw_date = row["date"] or ""
+    try:
+        date_int = int(raw_date.replace("-", "")) if raw_date else 0
+    except ValueError:
+        date_int = 0
     return (
         -prose_hit(folds, prepared),
         -matched_term_count(folds, prepared),
         -field_hit_score(folds, prepared),
+        -date_int,        # 日期降序：大整数取负后更小，故排前；0（空/非日期）最大，排末
         row["chunk_id"],
     )
 
@@ -676,17 +723,17 @@ def search(connection: sqlite3.Connection, query: str, source: str | None, autho
         clauses.append("SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ?")
         params.append(match_expression(long_terms))
     for term in short_terms:
-        for column in RECALL_COLUMNS:
-            # GLOB 是精确子串匹配。模式经 glob_pattern() 处理：元字符转成字面量，
-            # ASCII 字母折成 [Aa] 字符类抹掉 GLOB 自带的大小写敏感——否则 AI/ai/Ai
-            # 会各返回一批不同的结果。
-            #
-            # 这条路径本质是**线性扫描**：两字模式凑不出三个连续字面字符，没有可用的
-            # trigram，耗时随语料成正比（受控实测 100 倍数据 → 125 倍耗时，
-            # 见 glob_fold_ascii_case() 的说明）。真库 3362 块下三列并集
-            # 『AI』67.8ms、『竞价』44.1ms，当前规模可接受；新增来源前要重做性能验收。
-            clauses.append(f"SELECT chunk_id FROM chunks_fts WHERE {column} GLOB ?")
-            params.append(glob_pattern(term))
+        # GLOB 是精确子串匹配。模式经 glob_pattern() 处理：元字符转成字面量，
+        # ASCII 字母折成 [Aa] 字符类抹掉 GLOB 自带的大小写敏感——否则 AI/ai/Ai
+        # 会各返回一批不同的结果。
+        #
+        # 这条路径本质是**线性扫描**：两字模式凑不出三个连续字面字符，没有可用的
+        # trigram，耗时随语料成正比（受控实测 100 倍数据 → 125 倍耗时，
+        # 见 glob_fold_ascii_case() 的说明）。所以每个短词只扫一遍、且扫便宜的那张表，
+        # 三列在同一次扫描里 OR——理由与实测数字见 SHORT_TERM_RECALL_SQL。
+        clauses.append(SHORT_TERM_RECALL_SQL)
+        pattern = glob_pattern(term)
+        params.extend([pattern] * len(RECALL_COLUMNS))
 
     sql = f"""
         SELECT c.*, {RANK_PLACEHOLDER} AS rank
@@ -719,6 +766,44 @@ def search(connection: sqlite3.Connection, query: str, source: str | None, autho
     return rank_and_truncate(candidates, terms, limit)
 
 
+SYNONYMS_CONFIG = ROOT / "_知识库系统" / "config" / "synonyms.yaml"
+
+
+def expand_query(query: str) -> tuple[str, list[str]]:
+    """用 config/synonyms.yaml 把查询词扩成同义词组。返回 (新查询, 新增的词)。
+
+    为什么做在查询字符串这一层、而不是改 search()：检索层的召回与排序合同
+    已被 139 项测试钉死，动它要重测全部基线。扩展只是「把一个词换成多个词」，
+    多词查询本来就是 OR 语义（SPEC 2.2），所以改写查询串即可，检索层零改动。
+
+    只加词不替换 —— `转势` 在复利杯零命中，拿它顶替 `弱转强` 会丢掉该来源全部内容。
+    yaml 读不到时静默退化为不扩展：同义词是增强，不是硬依赖。
+    """
+    try:
+        import yaml
+        config = yaml.safe_load(SYNONYMS_CONFIG.read_text(encoding="utf-8"))
+    except Exception:
+        return query, []
+
+    terms = terms_from_query(query)
+    if not terms:
+        return query, []
+
+    added: list[str] = []
+    for group in (config.get("groups") or {}).values():
+        pool = [group.get("canonical", "")] + list(group.get("variants") or [])
+        pool = [p for p in pool if p]
+        # 查询词命中该组任一写法，就把该组其余写法都加进来
+        if any(t in pool for t in terms):
+            for word in pool:
+                if word not in terms and word not in added:
+                    added.append(word)
+
+    if not added:
+        return query, []
+    return query + " " + " ".join(added), added
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("query")
@@ -727,13 +812,22 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--show-parent", action="store_true")
+    parser.add_argument("--expand", action="store_true",
+                        help="用 config/synonyms.yaml 扩展同义词后再检索")
     args = parser.parse_args()
 
     if not DATABASE.exists():
         raise FileNotFoundError(f"Index not found. Run build_index.py first: {DATABASE}")
+
+    query = args.query
+    if args.expand:
+        query, added = expand_query(query)
+        if added and not args.json:
+            print(f"同义词扩展：+ {'、'.join(added)}\n")
+
     connection = sqlite3.connect(DATABASE)
     connection.row_factory = sqlite3.Row
-    rows = search(connection, args.query, args.source, args.author, args.limit)
+    rows = search(connection, query, args.source, args.author, args.limit)
     results = []
     for row in rows:
         item = dict(row)
