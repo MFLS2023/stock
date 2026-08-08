@@ -9,11 +9,17 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[2]
 LIBRARIES = ROOT / "_知识库系统" / "source_libraries"
 INDEX_DIR = ROOT / "_知识库系统" / "indexes"
 DATABASE = INDEX_DIR / "knowledge.db"
+SOURCES_YAML = ROOT / "_知识库系统" / "config" / "sources.yaml"
+
+# 只导入这些状态的来源；draft / disabled 跳过
+ALLOWED_STATUSES = {"integrated", "integrated_first_pass"}
 
 
 def read_jsonl(path: Path):
@@ -138,6 +144,12 @@ def add_chunk(connection: sqlite3.Connection, item: dict) -> None:
     )
 
 
+def load_source_registry() -> dict[str, dict]:
+    """从 sources.yaml 读取来源登记表，返回 {source_id: {status, display_name, ...}}。"""
+    config = yaml.safe_load(SOURCES_YAML.read_text(encoding="utf-8"))
+    return {s["id"]: s for s in config.get("sources", [])}
+
+
 def main() -> int:
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
     temporary = INDEX_DIR / "knowledge.db.tmp"
@@ -145,9 +157,20 @@ def main() -> int:
         temporary.unlink()
     connection = sqlite3.connect(temporary)
     tokenizer = create_schema(connection)
-    counts = {"documents": 0, "parents": 0, "chunks": 0, "methods": 0, "conflicts": 0}
+    counts = {"documents": 0, "parents": 0, "chunks": 0, "methods": 0, "conflicts": 0, "methods_skipped": 0}
 
+    registry = load_source_registry()
+    # display_name 字典，写 source_name 时从这里取，不硬编码
+    display_names = {sid: s.get("display_name", sid) for sid, s in registry.items()}
+
+    skipped: list[str] = []
     for library in sorted(path for path in LIBRARIES.iterdir() if path.is_dir()):
+        source_id = library.name
+        source_info = registry.get(source_id, {})
+        source_status = source_info.get("status", "")
+        if source_status not in ALLOWED_STATUSES:
+            skipped.append(f"{source_id} (status={source_status!r})")
+            continue
         for item in read_jsonl(library / "documents.jsonl") or []:
             connection.execute(
                 "INSERT INTO documents VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -170,7 +193,11 @@ def main() -> int:
         for item in read_jsonl(library / "chunks.jsonl") or []:
             add_chunk(connection, item)
             counts["chunks"] += 1
+        # methods：status 过滤——只导入 status=reviewed 的卡；没有 status 字段视为 draft
         for item in read_jsonl(library / "methods.jsonl") or []:
+            if item.get("status", "draft") != "reviewed":
+                counts["methods_skipped"] += 1
+                continue
             text = "\n".join(
                 part for part in [item.get("conclusion", ""), item.get("checklist", ""), item.get("quote", ""),
                                   item.get("conditions", ""), item.get("invalidation", ""), item.get("risk", "")] if part
@@ -178,10 +205,17 @@ def main() -> int:
             add_chunk(
                 connection,
                 {
-                    "chunk_id": item["method_id"], "source_id": item["source_id"], "source_name": "复利杯",
-                    "chunk_type": "curated_method", "title": item.get("title", "精选方法"),
-                    "author": "整理方法卡", "topics": [item.get("topic", "")], "claim_type": "rule",
-                    "locator": item.get("locator", ""), "text": text, "confidence": "curated",
+                    "chunk_id": item["method_id"],
+                    "source_id": item["source_id"],
+                    "source_name": display_names.get(item["source_id"], item["source_id"]),
+                    "chunk_type": "curated_method",
+                    "title": item.get("title", "精选方法"),
+                    "author": "整理方法卡",
+                    "topics": [item.get("topic", "")],
+                    "claim_type": "rule",
+                    "locator": item.get("locator", ""),
+                    "text": text,
+                    "confidence": "curated",
                 },
             )
             counts["methods"] += 1
@@ -195,10 +229,17 @@ def main() -> int:
             add_chunk(
                 connection,
                 {
-                    "chunk_id": item["conflict_id"], "source_id": item["source_id"], "source_name": "复利杯",
-                    "chunk_type": "conflict", "title": item.get("topic", "来源内分歧"), "author": "分歧整理",
-                    "topics": [item.get("topic", "")], "claim_type": "opinion", "locator": item.get("sources", ""),
-                    "text": text, "confidence": "curated",
+                    "chunk_id": item["conflict_id"],
+                    "source_id": item["source_id"],
+                    "source_name": display_names.get(item["source_id"], item["source_id"]),
+                    "chunk_type": "conflict",
+                    "title": item.get("topic", "来源内分歧"),
+                    "author": "分歧整理",
+                    "topics": [item.get("topic", "")],
+                    "claim_type": "opinion",
+                    "locator": item.get("sources", ""),
+                    "text": text,
+                    "confidence": "curated",
                 },
             )
             counts["conflicts"] += 1
@@ -206,13 +247,18 @@ def main() -> int:
     connection.execute("INSERT INTO metadata VALUES (?,?)", ("generated_at", datetime.now(timezone.utc).isoformat()))
     connection.execute("INSERT INTO metadata VALUES (?,?)", ("fts_tokenizer", tokenizer))
     connection.execute("INSERT INTO metadata VALUES (?,?)", ("counts", json.dumps(counts, ensure_ascii=False)))
+    if skipped:
+        connection.execute("INSERT INTO metadata VALUES (?,?)", ("skipped_sources", json.dumps(skipped, ensure_ascii=False)))
     connection.commit()
     result = connection.execute("PRAGMA integrity_check").fetchone()[0]
     connection.close()
     if result != "ok":
         raise RuntimeError(f"SQLite integrity check failed: {result}")
     os.replace(temporary, DATABASE)
-    print(json.dumps({"database": str(DATABASE), "tokenizer": tokenizer, **counts}, ensure_ascii=False, indent=2))
+    output = {"database": str(DATABASE), "tokenizer": tokenizer, **counts}
+    if skipped:
+        output["skipped_sources"] = skipped
+    print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
 
 

@@ -38,11 +38,36 @@ def main() -> int:
         manifest_rows = [json.loads(line) for line in MANIFEST.read_text(encoding="utf-8").splitlines() if line.strip()]
     check(bool(manifest_rows), "文件 manifest", f"记录数={len(manifest_rows)}", results)
 
+    ALLOWED_STATUSES = {"integrated", "integrated_first_pass"}
+
+    # status 一致性校验：登记表里 integrated 的来源目录必须存在；目录存在但状态不合法的警告
+    status_issues: list[str] = []
+    for source in config.get("sources", []):
+        sid = source["id"]
+        st = source.get("status", "")
+        lib_dir = SYSTEM / "source_libraries" / sid
+        if st in ALLOWED_STATUSES and not lib_dir.exists():
+            status_issues.append(f"{sid}: status={st!r} 但目录不存在")
+        if lib_dir.exists() and st not in ALLOWED_STATUSES:
+            status_issues.append(f"{sid}: 目录存在但 status={st!r} 不在白名单，索引会跳过此来源")
+    check(not status_issues, "来源 status 一致性", "; ".join(status_issues) if status_issues else "OK", results)
+
+    # 校验索引里的 source_id 必须全部在登记表允许状态内
+    if DATABASE.exists():
+        _conn = sqlite3.connect(DATABASE)
+        indexed_sources = {r[0] for r in _conn.execute("SELECT DISTINCT source_id FROM chunks").fetchall()}
+        _conn.close()
+        registered_allowed = {s["id"] for s in config.get("sources", []) if s.get("status", "") in ALLOWED_STATUSES}
+        orphan_sources = indexed_sources - registered_allowed
+        check(not orphan_sources, "索引来源合法性", f"索引中有未授权来源: {sorted(orphan_sources)}" if orphan_sources else "OK", results)
+
     expected_counts = {"documents": 0, "parents": 0, "chunks": 0}
     curated_index_rows = 0
     source_stats = {}
     all_chunks = []
     for source in config.get("sources", []):
+        if source.get("status", "") not in ALLOWED_STATUSES:
+            continue
         library = SYSTEM / "source_libraries" / source["id"]
         stats = {}
         for kind in ("documents", "parents", "chunks"):
@@ -53,10 +78,18 @@ def main() -> int:
             if kind == "chunks":
                 all_chunks.extend(rows)
         source_stats[source["id"]] = stats
-        for extra_name in ("methods.jsonl", "conflicts.jsonl"):
-            extra_path = library / extra_name
-            if extra_path.exists():
-                curated_index_rows += sum(1 for line in extra_path.read_text(encoding="utf-8").splitlines() if line.strip())
+        # methods：只统计 status=reviewed 的（与 build_index.py 保持一致）
+        methods_path = library / "methods.jsonl"
+        if methods_path.exists():
+            for line in methods_path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    item = json.loads(line)
+                    if item.get("status", "draft") == "reviewed":
+                        curated_index_rows += 1
+        # conflicts：全量进索引（没有状态过滤）
+        conflicts_path = library / "conflicts.jsonl"
+        if conflicts_path.exists():
+            curated_index_rows += sum(1 for line in conflicts_path.read_text(encoding="utf-8").splitlines() if line.strip())
     expected_counts["chunks"] += curated_index_rows
     missing = [item.get("chunk_id", "unknown") for item in all_chunks if not REQUIRED_CHUNK_FIELDS.issubset(item)]
     check(all(value["documents"] > 0 and value["chunks"] > 0 for value in source_stats.values()),
@@ -83,6 +116,26 @@ def main() -> int:
     check(all(counts.get(kind, -1) == expected_counts[kind] for kind in expected_counts),
           "索引记录数一致", f"SQLite={json.dumps(counts, ensure_ascii=False)} JSONL={json.dumps(expected_counts, ensure_ascii=False)}", results)
     check(all(count > 0 for count in sample_results.values()), "样例检索", json.dumps(sample_results, ensure_ascii=False), results)
+
+    # 方法卡状态分布：列出各来源 reviewed/draft/无字段 各几张
+    method_status_summary: dict[str, dict[str, int]] = {}
+    for source in config.get("sources", []):
+        if source.get("status", "") not in ALLOWED_STATUSES:
+            continue
+        mp = SYSTEM / "source_libraries" / source["id"] / "methods.jsonl"
+        if not mp.exists():
+            continue
+        dist: dict[str, int] = {}
+        for line in mp.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                st = json.loads(line).get("status", "(无字段)")
+                dist[st] = dist.get(st, 0) + 1
+        method_status_summary[source["id"]] = dist
+    if method_status_summary:
+        detail = "; ".join(f"{sid}={d}" for sid, d in method_status_summary.items())
+        reviewed_total = sum(d.get("reviewed", 0) for d in method_status_summary.values())
+        total_cards = sum(sum(d.values()) for d in method_status_summary.values())
+        check(True, "方法卡审批进度", f"reviewed={reviewed_total}/{total_cards}  {detail}", results)
 
     skill_root = ROOT / ".agents" / "skills"
     skill_names = [
