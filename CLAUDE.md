@@ -25,6 +25,27 @@
 
 ---
 
+## 运行环境（两个解释器，各缺一样东西）
+
+本机有两个 Python，**没有哪一个能跑全部脚本**。2026-08-08 在这上面踩了三次，
+所以写进文档：
+
+| 用途 | 解释器 | 有 | 缺 |
+|------|--------|----|----|
+| 跑测试、导入器 | `~/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe` | pypdf、PIL、yaml、requests | — |
+| 建索引、校验、查询 | `C:\Users\20577\AppData\Local\Programs\Python\Python312\python.exe` | yaml、requests、PIL | **pypdf** |
+
+- `yaml` 和 `requests` 是 2026-08-08 补装到 codex 运行时的（`pyyaml==6.0.2`、
+  `requests 2.34.2`）。装之前全套 `discover` 会因 `import yaml` / `import requests`
+  各报一个 error，而那两个 import 并非本轮改动引入 —— 是既有未提交改动带的。
+  补装后**全套 187 项第一次做到裸 OK、零 error**。
+- **装依赖前必须先清代理**：本机 `HTTP_PROXY=http://127.0.0.1:7897` 指向的代理
+  已不通（`curl` 返回 000），pip 会卡在 ProxyError。做法：
+  `unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy && export NO_PROXY="*"`。
+  这个死代理也会让 `urllib`/`requests` 抓网页失败，**失败不等于对方站点有问题**。
+- 所有脚本都要 `export PYTHONIOENCODING=utf-8`，否则中文输出乱码或 `UnicodeEncodeError`
+  （Windows 默认 GBK，写 JSON 遇生僻字会直接崩）。
+
 ## 目录结构
 
 ```
