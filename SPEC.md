@@ -1421,7 +1421,7 @@ Remove-Item Env:KB_REQUIRE_REAL_INDEX
 `test_*.py` 一起收，单看总数无法判断某轮改动交付了多少测试。当前组成：
 
 ```
-Ran 183 tests = test_query_kb.py        144   ← 检索层（99 fixture + 45 真库）
+Ran 187 tests = test_query_kb.py        148   ← 检索层（103 fixture + 45 真库）
               + test_kb_import_utils.py  34   ← 导入工具共用逻辑
               + test_import_feishu_chat.py 5  ← panfeng 的载体解析（飞书 HTML）
 ```

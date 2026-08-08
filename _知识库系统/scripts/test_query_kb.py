@@ -1891,6 +1891,29 @@ class RetrievalContractTests(unittest.TestCase):
                 with self.subTest(word=word):
                     self.assertNotIn(word, dead)
 
+    # --- 整句切词回退 -------------------------------------------------------
+    # terms_from_query 只按空格和标点切，中文长句切不开：实测
+    # 「怎么判断情绪周期拐点」被当成一个 10 字词做精确匹配返回 0 条，
+    # 而拆成「情绪周期」「拐点」各有 8 条。用户会误判「库里没有」。
+
+    def test_sentence_split_extracts_known_terms(self):
+        self.assertEqual(
+            query_kb.split_sentence("怎么判断情绪周期拐点"), ["情绪周期", "拐点"]
+        )
+
+    def test_sentence_split_prefers_longer_terms(self):
+        # 「情绪周期」必须整体切出，不能先被「情绪」吃掉再剩「周期」
+        pieces = query_kb.split_sentence("情绪周期怎么看")
+        self.assertIn("情绪周期", pieces)
+        self.assertNotIn("情绪", pieces)
+
+    def test_sentence_split_returns_empty_for_unknown_text(self):
+        self.assertEqual(query_kb.split_sentence("今天天气很好"), [])
+
+    def test_sentence_split_does_not_duplicate(self):
+        pieces = query_kb.split_sentence("龙头龙头龙头")
+        self.assertEqual(pieces.count("龙头"), 1)
+
     def test_expand_survives_a_missing_config(self):
         # 同义词是增强不是硬依赖：配置文件读不到时必须静默退化，不能让检索报错。
         original = query_kb.SYNONYMS_CONFIG

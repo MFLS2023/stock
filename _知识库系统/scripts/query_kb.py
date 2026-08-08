@@ -768,6 +768,58 @@ def search(connection: sqlite3.Connection, query: str, source: str | None, autho
 
 SYNONYMS_CONFIG = ROOT / "_知识库系统" / "config" / "synonyms.yaml"
 
+# 整句回退时用来切词的已知交易术语。按长度降序匹配，先长后短，
+# 避免「情绪周期」被先切成「情绪」而丢掉更精确的长词。
+# 词表来自 synonyms.yaml，读不到时用这份兜底（覆盖最高频的问法）。
+FALLBACK_TERMS = (
+    "情绪周期", "筹码断层", "赚钱效应", "弱转强", "涨停动因", "集合竞价",
+    "封板率", "连板", "首板", "反包", "龙头", "总龙", "破局龙", "中周期龙",
+    "核心票", "人气核心", "拐点", "冰点", "高潮", "分歧", "退潮", "混沌期",
+    "竞价", "低吸", "打板", "半路", "潜伏", "卡位", "筹码", "题材", "板块",
+    "梯队", "高度", "空间", "仓位", "半仓", "空仓", "止损",
+    "回撤", "溢价", "承接", "增量", "缩量", "放量", "换手", "封单", "炸板",
+    "情绪", "主线", "辨识度", "预期", "超预期", "复盘", "推演", "预案",
+    "满仓",
+)
+
+
+def split_sentence(query: str) -> list[str]:
+    """把中文整句切成已知术语。仅用于「整句检索无结果」时的回退。
+
+    为什么需要：terms_from_query 只按空格和标点切（re.split），中文长句切不开。
+    实测「怎么判断情绪周期拐点」被当成一个 10 字词做 FTS 精确匹配，返回 0 条，
+    而拆成「情绪周期」「拐点」各有 8 条 —— 用户会误以为库里没讲过。
+
+    只做术语提取，不做通用分词：通用分词要引入 jieba 之类的依赖，且会把
+    「怎么」「判断」这类疑问词也切出来，反而拉低精度。
+    """
+    terms: list[str] = []
+    vocabulary = _fallback_vocabulary()
+    remaining = query
+    for word in vocabulary:
+        if word in remaining and word not in terms:
+            terms.append(word)
+            remaining = remaining.replace(word, " ")
+    return terms
+
+
+@lru_cache(maxsize=1)
+def _fallback_vocabulary() -> tuple[str, ...]:
+    """从 synonyms.yaml 汇总术语表，按长度降序。读不到时用 FALLBACK_TERMS。"""
+    words: set[str] = set()
+    try:
+        import yaml
+        config = yaml.safe_load(SYNONYMS_CONFIG.read_text(encoding="utf-8"))
+        for group in (config.get("groups") or {}).values():
+            canonical = group.get("canonical")
+            if canonical:
+                words.add(canonical)
+            words.update(w for w in (group.get("variants") or []) if w)
+    except Exception:
+        pass
+    words.update(FALLBACK_TERMS)
+    return tuple(sorted(words, key=len, reverse=True))
+
 
 def expand_query(query: str) -> tuple[str, list[str]]:
     """用 config/synonyms.yaml 把查询词扩成同义词组。返回 (新查询, 新增的词)。
@@ -828,6 +880,18 @@ def main() -> int:
     connection = sqlite3.connect(DATABASE)
     connection.row_factory = sqlite3.Row
     rows = search(connection, query, args.source, args.author, args.limit)
+
+    # 整句无结果时按已知术语切词重试。
+    # 中文长句在 terms_from_query 里切不开（re.split 只认空格和标点），
+    # 「怎么判断情绪周期拐点」会被当成一个 10 字词做精确匹配，返回 0 条，
+    # 而拆成「情绪周期」「拐点」各有 8 条 —— 不兜这一下，用户会误判「库里没有」。
+    if not rows:
+        pieces = split_sentence(query)
+        if pieces and pieces != terms_from_query(query):
+            retry = " ".join(pieces)
+            rows = search(connection, retry, args.source, args.author, args.limit)
+            if rows and not args.json:
+                print(f"整句无结果，已按术语切词重试：{' / '.join(pieces)}\n")
     results = []
     for row in rows:
         item = dict(row)
