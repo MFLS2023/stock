@@ -203,10 +203,16 @@ def main() -> int:
             if item.get("status", "draft") != "reviewed":
                 counts["methods_skipped"] += 1
                 continue
-            text = "\n".join(
-                part for part in [item.get("conclusion", ""), item.get("checklist", ""), item.get("quote", ""),
-                                  item.get("conditions", ""), item.get("invalidation", ""), item.get("risk", "")] if part
-            )
+            parts = [
+                item.get("conclusion", ""), item.get("checklist", ""), item.get("quote", ""),
+                item.get("conditions", ""), item.get("invalidation", ""), item.get("risk", ""),
+            ]
+            # 用户审批时写下的未解问题也进正文，带前缀标明来源。
+            # 这些疑惑是该卡的已知缺口（卡答「该看什么」，用户问「怎么看出来」），
+            # 检索到卡时必须一并看到，否则会把半完备的卡当成可照做的规则。
+            if item.get("user_questions"):
+                parts.append(f"用户未解问题：{item['user_questions']}")
+            text = "\n".join(part for part in parts if part)
             add_chunk(
                 connection,
                 {

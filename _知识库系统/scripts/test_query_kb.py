@@ -2393,10 +2393,19 @@ class RealIndexTests(unittest.TestCase):
     def test_baseline_row_counts_per_source(self):
         # SPEC 3.1: the retrieval fixes must not change how much content is indexed.
         #
-        # Asserted per source, not as a sum. A sum of 3176 also holds for, say,
+        # Asserted per source, not as a sum. A sum of 3156 also holds for, say,
         # 1000/995/1181 — content could shift between sources and the total would not
         # move. The frozen baseline is the three numbers, so the three numbers are what
         # gets checked.
+        # 这个数字随方法卡审批状态摆动过一轮，两次都不是缺陷：
+        #   2026-08-04  20 张方法卡加上 status 字段、初始为 draft，被 status 过滤
+        #               挡在索引外，块数 1470 → 1450，当时把基线临时改成 1450。
+        #   2026-08-08  用户逐张审批完，20 张全部 status=reviewed 重新进索引，
+        #               块数回到 1470 —— 也就是 SPEC 0.1 节冻结的原始基线
+        #               （1470 / 525 / 1181 = 3176）。
+        # 所以这里改回 1470 不是"改测试迁就代码"，是回到 SPEC 的冻结值。
+        # 若将来有卡被改成 revised / rejected，这个数字会再次下降，届时按
+        # 「reviewed 卡数」重新对账，不要直接把实测值抄进来。
         expected = {
             "chunks": {"fulibei": 1470, "nanjinglu_bian": 525, "tulip_garden": 1181},
             "parents": {"fulibei": 441, "nanjinglu_bian": 80, "tulip_garden": 155},
@@ -2426,7 +2435,13 @@ class RealIndexTests(unittest.TestCase):
         # 字节，原先被 NUL 截断的正文重新可见，所以 prose_matches 用的 GLOB 能看到它们了。
         # 这两条不是阈值放宽，是分母变准——之前那两块的正文里确实写着这个词，只是
         # SQLite 按 C 字符串在 NUL 处停止比较，检索层看不到。
-        for term, expected in [("竞价", 394), ("筹码", 367), ("龙头", 616), ("打板", 186), ("情绪", 889)]:
+        # 方法卡审批状态会让这几个分母摆动，两次都不是缺陷：
+        #   2026-08-04  20 张卡初始 draft，被挡在索引外 -> 龙头 616→615、打板 186→183、
+        #               情绪 889→885、竞价 395→394。
+        #   2026-08-08  用户审批完，20 张 reviewed 重新进索引 -> 回到 SPEC 冻结值。
+        # 方法卡正文里确实写着这些词（实测方法卡贡献：竞价 1、龙头 1、打板 3、情绪 4、
+        # 情绪周期 2、弱转强 1），所以它进不进索引会直接改变分母。
+        for term, expected in [("竞价", 395), ("筹码", 367), ("龙头", 616), ("打板", 186), ("情绪", 889)]:
             with self.subTest(term=term):
                 self.assertEqual(self.prose_matches(term), expected)
 
@@ -2471,6 +2486,8 @@ class RealIndexTests(unittest.TestCase):
         # 情绪 406→405：数据清洁后有一块的正文不再被 NUL 截断，它从"仅标题含词"变成
         # "正文也含词"，于是标题独有数少 1。并集本身没变（1294），只是归属换了一栏。
         # 龙头的 310 不变——它那一块清洁前后都是正文含词。
+        # 方法卡审批状态同样影响这两个数：2026-08-04 卡改 draft 时 龙头 310→298、
+        # 情绪 405→397；2026-08-08 审批为 reviewed 后回到 SPEC 冻结的 310 / 405。
         for term, extra in [("竞价", 58), ("筹码", 48), ("龙头", 310), ("情绪", 405)]:
             with self.subTest(term=term):
                 self.assertEqual(
@@ -2533,9 +2550,21 @@ class RealIndexTests(unittest.TestCase):
         #
         # So 缺陷 C on real data is source skew alone, not label-only results. Keeping this
         # as a passing baseline stops a later fix from trading precision for coverage.
+        #
+        # **不再套 in_scope()**（2026-08-04，接入第 5 个来源后）。这一条测的是精度——
+        # 前 8 条是不是正文真含词——与结果落在哪个来源无关。而 in_scope() 是**先取全局
+        # 前 8、再把样本外的丢掉**，所以第 5 个来源一占位，剩下的就不足 8 条：实测
+        # 『打板』前 8 条全部来自爱在冰川，过滤后是 0 条，assertTrue(rows) 直接翻红。
+        #
+        # 那种红是**测试自己隐含了来源配额**，不是检索坏了：它要求样本三来源必须占满
+        # 前 8。SPEC.md:1104「不设来源配额，测试也不得隐性要求配额」明确禁止，同节还
+        # 记着上一次同类断言（test_two_character_query_must_span_sources）被删除的先例。
+        # 改成全库口径后实测五个词都是 8/8 正文真含，来源分布是
+        # 『竞价』郁金香1+冰川4+复利3、『筹码』郁金香8、『龙头』复利8、『打板』冰川8——
+        # 精度这个性质本来就成立，此前是被过滤器遮住了。
         for term in ("竞价", "龙头", "打板", "情绪", "筹码"):
             with self.subTest(term=term):
-                rows = self.in_scope(search(self.connection, term, None, None, 8))
+                rows = search(self.connection, term, None, None, 8)
                 self.assertTrue(rows)
                 self.assertTrue(all(term in row["text"] for row in rows))
 
@@ -2567,8 +2596,10 @@ class RealIndexTests(unittest.TestCase):
         # 两条不能同时成立。阶段 2 的表格（正文 203 + 标题作者独有 313 = 并集 516）和本
         # 阶段对应的旧 expectedFailure（断言"不超过并集"）都指向并集口径。
         # （清洁前是 202 + 314，那组是历史值；并集 516 前后一致，只是归属换了一栏。）
+        # 方法卡审批状态影响这两个数：2026-08-04 卡改 draft 时 情绪周期 516→505、
+        # 弱转强 111→110；2026-08-08 审批为 reviewed 后回到 SPEC 阶段 1 验收表的 516 / 111。
         #
-        # 断言写成"等于并集"而不是写死 516：并集本身由 test_prose_match_baselines_hold
+        # 断言写成"等于并集"而不是写死数字：并集本身由 test_prose_match_baselines_hold
         # 和 test_recall_target_exceeds_prose_for_high_traffic_terms 钉住，这里要证明的是
         # FTS 命中与并集严格相等——多一条说明 topics 漏进来了，少一条说明人写字段被砍了。
         expected = {"情绪周期": 516, "龙头与核心": 0, "弱转强": 111, "筹码断层": 52}
@@ -2596,6 +2627,8 @@ class RealIndexTests(unittest.TestCase):
     def test_topics_survives_on_the_chunks_table(self):
         # 阶段 1 只动 FTS 的可匹配列，不动数据。topics 仍要有值：relevance() 读它，
         # 检索结果的"主题:"一行也显示它。
+        # 3176 = SPEC 0.1 节冻结的回归样本块数（1470/525/1181）。方法卡 draft 期间
+        # 这个数曾是 3156，2026-08-08 审批后回到 3176。
         filled = self.connection.execute(
             f"SELECT count(*) FROM chunks WHERE source_id IN ({SAMPLE_PLACEHOLDERS}) "
             f"AND topics != ''",
@@ -2622,11 +2655,24 @@ class RealIndexTests(unittest.TestCase):
         #
         # 这里只钉小 limit 的可信度：前 8 条必须条条落在三字段并集内，即截断之后也没有
         # 拿标签噪声来填。顺序对不对归阶段 3。
+        #
+        # **口径从样本换成全库**（2026-08-04，接入第 5 个来源后）：去掉 in_scope()，
+        # 分母同步换成模块级的 recall_target_ids()（全库三字段并集）。理由与
+        # test_default_limit_already_returns_prose_matches 同一条，见那里的说明——
+        # in_scope() 先取全局前 8 再丢样本外的，第 5 个来源占满前 8 时会剩 0 条，
+        # 那是测试隐含来源配额（SPEC.md:1104 禁止），不是"拿标签噪声来填"。
+        #
+        # 两个口径必须一起换：只去掉 in_scope() 而分母仍用样本版 self.recall_target_ids()，
+        # 断言会变成"全库前 8 条都得落在样本三来源的并集里"——那比原来更严，
+        # 且仍然是配额，只是换了个方向。
         for term in ("竞价", "龙头", "打板", "情绪"):
             with self.subTest(term=term):
-                rows = self.in_scope(search(self.connection, term, None, None, 8))
+                rows = search(self.connection, term, None, None, 8)
                 self.assertTrue(rows)
-                self.assertTrue({row["chunk_id"] for row in rows} <= self.recall_target_ids(term))
+                self.assertTrue(
+                    {row["chunk_id"] for row in rows}
+                    <= recall_target_ids(self.connection, term)
+                )
 
     def test_prose_matches_outrank_title_only_matches_on_the_real_corpus(self):
         # SPEC 3.1 阶段 3 验收表第一行的真库版，也是 fixture 侧同名断言的对照。
@@ -2637,9 +2683,19 @@ class RealIndexTests(unittest.TestCase):
         # 阶段 3 实测：五个词在样本口径下全部 8/8（『打板』由 7/7 变 8/8——正文优先层
         # 把原先那条样本外的 title 命中挤了下去）。断言写成"全部正文真含"而不是写死
         # 比例，比例会随语料变。
+        #
+        # **去掉 in_scope()**（2026-08-04，接入第 5 个来源后）。这条断言写着
+        # ``assertEqual(len(rows), 8)``，而 in_scope() 是先取全局前 8 再丢掉样本外的，
+        # 于是"够 8 条"实际要求的是**样本三来源占满前 8**。第 5 个来源接入后实测
+        # 『打板』0 条、『竞价』4 条、『情绪』7 条，全部翻红。
+        #
+        # 三条红都不是精度退化：去掉过滤后五个词一律 8/8 正文真含。红的是过滤器本身——
+        # 它把"前 8 条来自哪些来源"偷偷变成了通过条件，即 SPEC.md:1104 禁止的隐性配额。
+        # 长度断言保留（它防的是"候选不足导致返回不满 8 条"这类真问题），只是分母
+        # 从样本换成全库，与本条要证的性质（正文优先）对齐。
         for term in RECALL_DEFECT_TERMS + ("筹码",):
             with self.subTest(term=term):
-                rows = self.in_scope(search(self.connection, term, None, None, 8))
+                rows = search(self.connection, term, None, None, 8)
                 self.assertEqual(len(rows), 8)
                 self.assertTrue(all(term in row["text"] for row in rows))
 
@@ -2683,7 +2739,7 @@ class RealIndexTests(unittest.TestCase):
             for previous, current in zip(rows, rows[1:]):
                 previous_key = ranking_key(previous, [term])
                 current_key = ranking_key(current, [term])
-                if previous_key[:3] == current_key[:3]:
+                if previous_key[:4] == current_key[:4]:
                     found_tie = True
                     with self.subTest(term=term, pair=(previous["chunk_id"], current["chunk_id"])):
                         self.assertLess(previous["chunk_id"], current["chunk_id"])

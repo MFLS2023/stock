@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-04T07:41:27.429605+00:00",
-  "passed": 11,
-  "total": 11,
+  "generated_at": "2026-08-08T15:25:36.506897+00:00",
+  "passed": 14,
+  "total": 14,
   "success": true,
   "checks": [
     {
@@ -18,6 +18,16 @@
       "name": "文件 manifest",
       "passed": true,
       "detail": "记录数=3194"
+    },
+    {
+      "name": "来源 status 一致性",
+      "passed": true,
+      "detail": "OK"
+    },
+    {
+      "name": "索引来源合法性",
+      "passed": true,
+      "detail": "OK"
     },
     {
       "name": "全部来源内容入库",
@@ -53,6 +63,11 @@
       "name": "样例检索",
       "passed": true,
       "detail": "{\"情绪周期\": 632, \"仓位 回撤\": 1358, \"92科比\": 91, \"筹码\": 772, \"弱转强\": 287}"
+    },
+    {
+      "name": "方法卡审批进度",
+      "passed": true,
+      "detail": "reviewed=20/20  fulibei={'reviewed': 20}"
     },
     {
       "name": "项目 Skills",
