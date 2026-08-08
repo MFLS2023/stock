@@ -63,6 +63,14 @@
 | 查行情该调哪个接口（盘中实时 + 盘后复盘） | `/market-data-toolbox` |
 | 复盘一笔交易，对照方法卡 | `/trading-journal-reviewer` |
 | 导入新来源，执行预检和注册 | `/trading-source-curator` |
+| 用某位导师的视角推演盘面 | `/nanjinglu-bian-perspective`、`/yujinxiang-perspective` |
+
+**这些斜杠命令在 2026-08-08 之前是敲不出来的。** 六个工作流放在 `.agents/skills/`
+（Codex 的目录），而 Claude Code 只扫 `~/.claude/skills/` —— 两边不通，
+所以用户在 Claude Code 里一个都调不了，只能手敲 `python query_kb.py`。
+已用 `scripts/sync_skills.py --apply` 同步过去，现在 Claude Code 里可见 13 个 skill
+（此前 5 个）。格式本来就兼容（六个都用 `name:` 首字段，无 Codex 专有字段），
+纯粹是位置问题。
 
 ---
 
@@ -348,7 +356,13 @@ OCR 重复识别的正文已用 n-gram 比对剔除，不会与文本层重复�
 2026-08-08 实测发现那边是 v1.0 旧版（郁金香 554 行，项目里已是 1172 行 v2.0），
 **旧版 `grep "不接受撤单"` 命中 0** —— 用户此前调用时拿到的是缺交易所硬规则、
 且未标注 AI 推定阈值的版本。已同步，旧版备份在 `~/.claude/skills/_backup-v1-20260809/`。
-改完项目里的 SKILL 后**必须复制到 `~/.claude/skills/` 才生效**。
+
+**改完项目里的 SKILL 后跑 `python scripts/sync_skills.py --apply`**（先不带 `--apply`
+看差异）。这个脚本同时管 `.agents/skills/` 和 `_导师试验/skills/` 两处，
+并检查 frontmatter 首字段是不是 `name:`。
+
+**为什么不用符号链接**：Windows 上 `ln -s` 会退化成目录复制（实测创建后
+`[ -L ]` 为假、`ls -la` 显示 `drwx` 而非 `l`），所以无法一劳永逸，只能定期同步。
 
 **⚠️ frontmatter 首字段必须是 `name:` 不是 `skill:`。** 两个导师 SKILL 原来写的是
 `skill:`，Claude Code 认不出来，一直没被加载（本机 7 个 skill 里 5 个用 `name`）。

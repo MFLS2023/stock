@@ -16,6 +16,10 @@
 # --- 二进制索引（48M，每次重建全量变化）---
 # 回滚依赖 backups/ 下的物理备份，不依赖 Git
 _知识库系统/indexes/*.db
+# 正式索引在 indexes/ 子目录。这一行防的是有脚本误在 _知识库系统/ 根下建 db：
+# 2026-08-04 就出现过一个 0 字节的 _知识库系统/knowledge.db，零引用且未被忽略，
+# git add . 会把它收进版本库。已删除，这条规则防止再犯。
+_知识库系统/*.db
 _知识库系统/indexes/*.db-shm
 _知识库系统/indexes/*.db-wal
 # 导入前的库快照（如 knowledge.db.backup-before-azbc，44M），只留本机
