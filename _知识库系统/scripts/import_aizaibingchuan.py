@@ -46,6 +46,17 @@ MAX_CHUNK_CHARS = 1600
 MIN_DOC_CHARS = 100          # 清洗后正文不足此数的文档跳过
 MIN_AUTHOR_REPLY = 25        # 作者回复短于此值不单独入库（"嗯""是的"这类）
 
+# 图文映射：由 build_azbc_image_map.py 生成，记录每张本地图片落在正文第几段之后。
+# 公众号 .md 里的图片是远程链接，clean_wechat_markdown 整体删除，正文里不留痕迹；
+# 而作者大量用「上图/下图/图中」指代（全库 860 处）。这张表把两边接起来。
+# 文件不存在时导入照常进行，image_path 留空——映射是增强，不是硬依赖。
+IMAGE_MAP_PATH = LIB / "image_map.json"
+IMAGE_DOWNLOAD_ROOT = Path(
+    r"C:/Users/20577/Neverflandre/wechatDownload4.6/下载/爱在冰川/图片"
+)
+# locator 形如「正文第12段」或「正文第12段—正文第18段」
+LOCATOR_RANGE_RE = re.compile(r"正文第(\d+)段(?:—正文第(\d+)段)?")
+
 # 文件名形如 [2021-10-28-0001]20211027复盘.md
 NAME_RE = re.compile(r"^\[(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})\](.*)$")
 
@@ -512,6 +523,52 @@ def parse_name(path: Path) -> dict | None:
     }
 
 
+def load_image_map() -> dict[str, list[dict]]:
+    """读图文映射，返回 {.md 文件名: [图片条目]}。
+
+    缺文件不报错：映射由 build_azbc_image_map.py 单独生成，
+    它依赖 wechatDownload 的本地下载目录，那个目录不属于本项目。
+    没有它时导入照常跑，只是 image_path 全空。
+    """
+    if not IMAGE_MAP_PATH.exists():
+        print(f"未找到图文映射 {IMAGE_MAP_PATH.name}，image_path 将留空")
+        return {}
+    try:
+        rows = json.loads(IMAGE_MAP_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"图文映射读取失败（{exc}），image_path 将留空")
+        return {}
+    return {row["md"]: row.get("images", []) for row in rows}
+
+
+def paragraph_span(locator: str) -> tuple[int, int] | None:
+    """从 locator 解出段号区间。留言区与页码格式返回 None。"""
+    match = LOCATOR_RANGE_RE.search(locator)
+    if not match:
+        return None
+    first = int(match.group(1))
+    last = int(match.group(2)) if match.group(2) else first
+    return first, last
+
+
+def images_for_locator(images: list[dict], locator: str) -> list[str]:
+    """挑出落在该 locator 段号区间内的图片，返回绝对路径。
+
+    映射里的 after_paragraph 表示「这张图在第 N 段之后」，
+    所以判定条件是 first <= after_paragraph <= last。
+    """
+    span = paragraph_span(locator)
+    if span is None or not images:
+        return []
+    first, last = span
+    paths = []
+    for item in images:
+        after = item.get("after_paragraph", 0)
+        if first <= after <= last:
+            paths.append(str(IMAGE_DOWNLOAD_ROOT / item["folder"] / item["file"]))
+    return paths
+
+
 def classify_content(title: str) -> str:
     """内容类型，供检索时按体裁过滤。"""
     zh = re.sub(r"[^一-鿿]", "", title)
@@ -556,6 +613,10 @@ def main() -> int:
     stat_reply_chars = 0
     stat_dropped_chars = 0
     stat_reply_count = 0
+    stat_chunks_with_image = 0
+    stat_images_attached = 0
+
+    image_map = load_image_map()
 
     print(f"来源目录 {SOURCE_ROOT}")
     print(f"待处理 {len(files)} 个 .md -> 输出 {lib}")
@@ -592,6 +653,7 @@ def main() -> int:
         stat_reply_count += len(replies)
 
         reply_text = "\n".join(item["answer"] for item in replies)
+        doc_images = image_map.get(path.name, [])
         content_type = classify_content(meta["title"])
         topics = infer_topics(meta["title"], body + "\n" + reply_text)
         content_counter[content_type] += 1
@@ -629,6 +691,10 @@ def main() -> int:
                 # 小节标题拼进块首，让单块脱离上下文也知道在讲什么
                 if section["heading"] and not chunk_text.startswith(section["heading"]):
                     chunk_text = f"{section['heading']}\n{chunk_text}"
+                chunk_images = images_for_locator(doc_images, unit["locator"])
+                if chunk_images:
+                    stat_chunks_with_image += 1
+                    stat_images_attached += len(chunk_images)
                 chunk_rows.append({
                     "source_id": SOURCE_ID,
                     "source_name": SOURCE_NAME,
@@ -645,7 +711,7 @@ def main() -> int:
                     "locator": unit["locator"],
                     "text": chunk_text,
                     "original_path": str(path),
-                    "image_path": "",
+                    "image_path": chunk_images,
                     "confidence": "high",
                     "extraction_method": "wechat_markdown",
                 })
@@ -726,7 +792,9 @@ def main() -> int:
             "related_original_paths": [],
             "normalized_text_path": str(text_path),
             "sha256": digest,
-            "risk_flags": "图片未OCR，图表内容需回看原文",
+            "risk_flags": ("图片未OCR，图表内容需回看原文"
+                           + ("；正文配图已关联本地文件，见 chunk 的 image_path"
+                              if doc_images else "")),
         })
 
         if index % 400 == 0:
@@ -758,6 +826,9 @@ def main() -> int:
         "author_reply_characters": stat_reply_chars,
         "author_reply_count": stat_reply_count,
         "reader_comment_characters_dropped": stat_dropped_chars,
+        "chunks_with_image": stat_chunks_with_image,
+        "images_attached": stat_images_attached,
+        "image_map_articles": len(image_map),
         "extraction_method": "wechat_markdown + wechat_comment_reply",
     }
     write_text_lf(lib / "source_summary.json",
@@ -795,9 +866,22 @@ def main() -> int:
         "其中读者留言是噪声，但作者本人的回复是导师原话（问答配对，价值密度高于复盘"
         "正文），因此单独提取成 `qa_reply` 块，并保留最近一条读者提问作为上下文。",
         "",
+        "## 图文关联（image_path）",
+        f"- 映射覆盖 {len(image_map)} 篇文章，"
+        f"关联到 {stat_chunks_with_image} 个块、{stat_images_attached} 张图。",
+        "- 映射由 `build_azbc_image_map.py` 生成，记录每张本地图片落在正文第几段之后；"
+        "块的 `locator` 段号区间内有图，就把图的绝对路径写进 `image_path`。",
+        "- 图片本体在 wechatDownload 的下载目录，不在本项目内。"
+        "换机器或移动下载目录后需重跑映射生成器。",
+        "- **段号与 locator 同源**：映射生成器直接复用本导入器的 "
+        "`clean_wechat_markdown` / `split_body_and_comments` / `strip_leading_title`，"
+        "不自己重写清洗逻辑，否则段号会与 locator 对不上。",
+        "- 留言区块（`qa_reply`）不关联图片：留言区没有作者配图。",
+        "",
         "## 清洗说明",
         "- 微信导出的 .md 中图片语法、URL、样板行占原文约 77%，本导入器整体删除。",
-        "- 图片未做 OCR：正文里的数据表格和涨停梯队图以图片形式存在，检索不到，需回看原文。",
+        "- 图片未做 OCR：正文里的数据表格和涨停梯队图以图片形式存在，"
+        "**文字内容检索不到**；但 `image_path` 现在能定位到图片文件，可直接回看。",
         "- 每篇固定的免责声明与署名行已移除，避免 2584 篇重复文本污染检索。",
         "- 正文首行重复文件名标题的那一行已删除（实测抽样 40/40 篇都重复）。",
         "",

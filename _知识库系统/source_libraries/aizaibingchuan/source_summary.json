@@ -1,7 +1,7 @@
 {
   "source_id": "aizaibingchuan",
   "source_name": "爱在冰川",
-  "generated_at": "2026-08-04T07:39:22+00:00",
+  "generated_at": "2026-08-08T03:23:15+00:00",
   "files_seen": 2655,
   "documents": 2528,
   "parents": 5135,
@@ -29,6 +29,9 @@
   "author_reply_characters": 785523,
   "author_reply_count": 14136,
   "reader_comment_characters_dropped": 8001028,
+  "chunks_with_image": 3237,
+  "images_attached": 23309,
+  "image_map_articles": 2529,
   "extraction_method": "wechat_markdown + wechat_comment_reply",
   "extras_included": {
     "note": "以下总数含 import_azbc_extras.py 导入的额外资料；重跑 import_aizaibingchuan.py 会覆盖 jsonl 并抹掉这批，需再跑一次额外资料导入器",

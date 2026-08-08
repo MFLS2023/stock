@@ -83,7 +83,8 @@ def create_schema(connection: sqlite3.Connection) -> str:
             locator TEXT NOT NULL,
             text TEXT NOT NULL,
             original_path TEXT,
-            confidence TEXT
+            confidence TEXT,
+            image_path TEXT
         );
         CREATE INDEX idx_chunks_source ON chunks(source_id);
         CREATE INDEX idx_chunks_author ON chunks(author);
@@ -133,11 +134,15 @@ def add_chunk(connection: sqlite3.Connection, item: dict) -> None:
         item.get("text", ""),
         item.get("original_path", ""),
         item.get("confidence", ""),
+        # 新列一律追加在末尾：下面的 FTS 插入按下标取 title/author/text
+        # （row[6]/row[8]/row[14]），在中间插列会让这三个下标错位。
+        join_value(item.get("image_path")),
     )
     connection.execute(
-        "INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", row
+        "INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", row
     )
     # row[10] 是 topics，故意不写进 FTS——见 create_schema 的说明。
+    # image_path 同样不进 FTS：它是文件路径，不是可检索的自然语言。
     connection.execute(
         "INSERT INTO chunks_fts(chunk_id,title,author,text) VALUES (?,?,?,?)",
         (row[0], row[6], row[8], row[14]),
