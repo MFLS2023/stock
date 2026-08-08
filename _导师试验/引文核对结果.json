@@ -1,0 +1,705 @@
+{
+ "nanjinglu": {
+  "source_id": "nanjinglu_bian",
+  "corpus_chunks": 525,
+  "quotes": 63,
+  "counts": {
+   "库内无": 60,
+   "短片段回溯": 1,
+   "已回溯": 1,
+   "片段回溯": 1
+  },
+  "detail": [
+   {
+    "line": 64,
+    "quote": "目前属于混沌期,看不懂就不做",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 65,
+    "quote": "破局龙出现了,10天100%,开始关注",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 66,
+    "quote": "主升段持有不动,只要价格未破坏",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 181,
+    "quote": "指标所处的环境是动态的,使用的时候不能只看数据,还需要结合情绪周期的模型所处何种周期阶段",
+    "verdict": "短片段回溯",
+    "chunk_id": "nanjinglu-60408d15eb48-p002-c04",
+    "locator": "第5页"
+   },
+   {
+    "line": 196,
+    "quote": "跌停数≥7-10,管住手看戏",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 197,
+    "quote": "封板率<60% + 高度压制,不做接力",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 198,
+    "quote": "RPS三线红池子从187峰值缩到101,情绪极差",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 341,
+    "quote": "只要价格未破坏,持有不动",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 342,
+    "quote": "跌5个点很正常,不要被洗出去",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 343,
+    "quote": "龙头一旦跌停,这就是价格破坏信号",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 389,
+    "quote": "从那之后我发誓绝对不头铁",
+    "verdict": "已回溯",
+    "chunk_id": "nanjinglu-568918f184c7-p001-c03",
+    "locator": "第2页"
+   },
+   {
+    "line": 398,
+    "quote": "辨识度、持续性、空间想象力",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 425,
+    "quote": "机器人板块辨识度高,空间想象力足",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 426,
+    "quote": "科技板块太宽泛,辨识度不够",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 427,
+    "quote": "政策支持的板块持续性更好",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 578,
+    "quote": "赛为智能能走那么高,因为有成飞长城等中周期龙护航",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 579,
+    "quote": "一旦中周期龙断了,总龙就危险了",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 678,
+    "quote": "现在是情绪低点,可以开始观察了",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 679,
+    "quote": "补涨票都疯了,该撤了",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 680,
+    "quote": "不贪最后一口,见好就收",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 684,
+    "quote": "低点拿先手、高点提前撤",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 799,
+    "quote": "多点从大局出发理解天道",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 800,
+    "quote": "天道一出,立即退出,不讲道理",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 808,
+    "quote": "XX公司收到上交所关注函,要求说明股价异常波动原因",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 813,
+    "quote": "监管约谈多家券商,规范两融业务",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 818,
+    "quote": "XX部委发文规范XX行业无序竞争",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 823,
+    "quote": "人民日报评论: 警惕XX概念过度炒作",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 829,
+    "quote": "交易所提示投资者注意XX板块投资风险",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 834,
+    "quote": "XX证券发布报告,认为XX板块估值过高",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 839,
+    "quote": "龙头公司XX被曝财务造假嫌疑",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 912,
+    "quote": "封板率虽然低,但涨停数很高啊",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1096,
+    "quote": "都是破局龙,要看是否",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1248,
+    "quote": "跌停数≥7,封板率<60%,所以不做",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1251,
+    "quote": "从那之后我发誓绝对不XX",
+    "verdict": "片段回溯",
+    "chunk_id": "nanjinglu-568918f184c7-p001-c03",
+    "locator": "第2页"
+   },
+   {
+    "line": 1281,
+    "quote": "用在**确实数据不足**的时候,不是用在",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1286,
+    "quote": "看不懂就不做。因为你的数据不全。",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1294,
+    "quote": "说方法论,不说买卖指令",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1342,
+    "quote": "我掉进了哪几条反模式",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1405,
+    "quote": "需要征求别人同意才能止损",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1411,
+    "quote": "会亏损、会看错、会踏空",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1421,
+    "quote": "止损就是认怂，我不接受",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1462,
+    "quote": "我就看看，真到止损位我一定走",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1463,
+    "quote": "这个票基本面好，可以不用挂止损",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1464,
+    "quote": "止损位太近，容易被震出来",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1501,
+    "quote": "落袋为安，不贪最后一口",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1621,
+    "quote": "亏了30%，要涨43%才能回本，太难了，我重仓搏一把",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1622,
+    "quote": "这笔钱亏了，下笔一定要翻倍赚回来",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1641,
+    "quote": "都亏20%了，再割不就是傻逼吗？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1643,
+    "quote": "套了就拿着，反正不卖就不亏",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1654,
+    "quote": "，你已经掉进成本价陷阱了。正确的决策只有一个问题：",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1661,
+    "quote": "跌了这么多，肯定是底部了",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1662,
+    "quote": "这个价格太便宜了，加仓",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1663,
+    "quote": "跌得越多，我买得越多",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1756,
+    "quote": "按系统做，能止盈止损",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1818,
+    "quote": "现在能不能买/该不该走",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1825,
+    "quote": "这个票为什么不是破局龙",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1840,
+    "quote": "这个形态属于什么阶段",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1878,
+    "quote": "教方法论,不教买什么票",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1889,
+    "quote": "现在市场处于情绪周期的哪个阶段？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1891,
+    "quote": "封板率60%在周期中代表什么？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1892,
+    "quote": "天道压制有哪些具体信号？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1893,
+    "quote": "量化时代如何调整策略？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1911,
+    "quote": "现在涨停数只有20,跌停数8个,RPS三线红池子从180多缩到100出头,这是什么情况？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   }
+  ]
+ },
+ "yujinxiang": {
+  "source_id": "tulip_garden",
+  "corpus_chunks": 1181,
+  "quotes": 34,
+  "counts": {
+   "库内无": 32,
+   "短片段回溯": 2
+  },
+  "detail": [
+   {
+    "line": 124,
+    "quote": "很多人会在这里看一眼",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 138,
+    "quote": "海南华铁2.11属于当日断层，成本都在2.11的板上",
+    "verdict": "短片段回溯",
+    "chunk_id": "tulip-32448e6e4778-p001-c03",
+    "locator": "正文第13段—正文第15段"
+   },
+   {
+    "line": 139,
+    "quote": "筹码密集区是天然支撑位",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 169,
+    "quote": "倍数够 + 委卖绝对额相对该票体量足够小",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 193,
+    "quote": "诚实边界 → 数据边界",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 206,
+    "quote": "竞价也是最能代表超短资金意愿的一个环节",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 207,
+    "quote": "竞价金额11亿，委卖12.35亿，委买1.59亿 → 封烂板",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 273,
+    "quote": "这种票我要是买就买多了，要不然就不买，但是在路上不敢下这个指令",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 285,
+    "quote": "冰点→破局→主升→补涨→退潮→冰点",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 342,
+    "quote": "天道压制可打断任何阶段",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 347,
+    "quote": "情绪冰点，看不懂就不做",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 434,
+    "quote": "如果是合力票，看大单净额；如果是做盘票，没有参考意义",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 435,
+    "quote": "合力票点位来自市场共识",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 462,
+    "quote": "日内最低点不破，就是看点；破了，就是取关点",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 478,
+    "quote": "如果这样走，我就那样做",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 484,
+    "quote": "筹码形态清晰 / 竞价数据可解读 / 情绪流位置明确 / 能推演次日走势",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 518,
+    "quote": "模式内就做，模式外坚决不碰",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 715,
+    "quote": "合力有合力的点位，做盘有做盘的点位",
+    "verdict": "短片段回溯",
+    "chunk_id": "tulip-32448e6e4778-p001-c01",
+    "locator": "正文第1段—正文第11段"
+   },
+   {
+    "line": 753,
+    "quote": "看不懂就不做。你这数据我判断不了。",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 760,
+    "quote": "竞价数据取不到，模型2 用不了",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 766,
+    "quote": "委卖是委买 8 倍，抛压吃不掉，不卡位",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 779,
+    "quote": "判断对了怎么真的做到",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 814,
+    "quote": "破日内最低点立即止损",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 997,
+    "quote": "我的判断可能是错的，已经多次卖飞证明了这一点",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 998,
+    "quote": "不保证盈利，只提供分析框架",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 999,
+    "quote": "不适合所有人，超短压力大、风险高",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1000,
+    "quote": "承认局限性，看不懂就不做",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1001,
+    "quote": "坦诚失误，失败更有价值",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1010,
+    "quote": "海南华铁当日断层后次日分歧，从筹码和承接角度怎么判断？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1011,
+    "quote": "竞价委卖远大于委买，是否应该回避？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1012,
+    "quote": "情绪冰点中市场共识票超预期，如何把握预期差？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1028,
+    "quote": "我持有的票今天分歧了，怎么办？",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1046,
+    "quote": "周期决定要不要出手，性质决定用哪把尺子，承接决定何时收手",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   },
+   {
+    "line": 1050,
+    "quote": "与其他体系并用的边界",
+    "verdict": "库内无",
+    "chunk_id": "",
+    "locator": ""
+   }
+  ]
+ }
+}
