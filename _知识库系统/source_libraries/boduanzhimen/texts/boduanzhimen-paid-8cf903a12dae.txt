@@ -1,0 +1,8 @@
+[全文第1段 | txt]
+指标如下(通达信)
+{更多精品资源:WWW.IDOWN.TOP}
+T1:EVERY(AMO>REF(AMO,1),3) AND EVERY(C>REF(C,1),4);
+DRAWTEXT(T1,0.8,'跌'),COLORGREEN;
+T2:EVERY(AMO<REF(AMO,1),3) AND EVERY(C<REF(C,1),4);
+DRAWTEXT(T2,0.2,'底'),COLORGREEN;
+{更多精品资源,公众号:IDOWN分享}

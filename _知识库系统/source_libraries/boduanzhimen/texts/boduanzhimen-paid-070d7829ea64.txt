@@ -1,0 +1,8 @@
+[全文第1段 | txt]
+如何避免上述情况引起的亏损,我设计了如下的指标。
+{更多精品资源:WWW.IDOWN.TOP}
+BOLL:=MA(CLOSE,20);
+UB:=BOLL+2*STD(CLOSE,20);
+LB:=BOLL-2*STD(CLOSE,20);
+A:H/UB>0.998 AND C<MA(C,89) AND BOLL<REF(BOLL,1) ;
+{更多精品资源,公众号:IDOWN分享}

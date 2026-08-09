@@ -1,0 +1,19 @@
+id: boduanzhimen
+display_name: 波段之门
+source_path: 波段之门
+source_type: wechat_article_plus_paid_pdf
+status: integrated
+original_policy: read_only
+primary_locator: date_section_image
+pipeline: wechat_md_plus_paid_pdf
+adapter: specialized_boduanzhimen
+author: 波段之门
+notes: 单作者。公众号 md 为正文源，同名 html/mhtml/docx/pdf 视为同源冗余不重复建块；留言区仅保留作者本人回复（4984条，多于正文块）；付费扫描
+  PDF 走 OCR；正文 〔图〕 为图片占位，结论可能只在图中。
+last_import_summary:
+  documents: 849
+  chunks: 7986
+  errors: 0
+approved_on: '2026-08-09'
+smoke_query: 目标位
+author_smoke_query: 不要满仓

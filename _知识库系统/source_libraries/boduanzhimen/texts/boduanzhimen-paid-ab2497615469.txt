@@ -1,0 +1,4 @@
+[全文第1段 | txt]
+{更多精品资源:WWW.IDOWN.TOP}
+A:C<REF(C,1) AND H>MA(C,5) AND L<MA(C,5) AND C>MA(C,13);
+{更多精品资源,公众号:IDOWN分享}

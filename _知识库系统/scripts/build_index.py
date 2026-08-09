@@ -265,7 +265,33 @@ def main() -> int:
     connection.close()
     if result != "ok":
         raise RuntimeError(f"SQLite integrity check failed: {result}")
-    os.replace(temporary, DATABASE)
+    try:
+        os.replace(temporary, DATABASE)
+    except PermissionError:
+        # Windows 上常驻进程（MCP 服务、编辑器索引器）会以
+        # FILE_SHARE_READ|FILE_SHARE_WRITE 但**不带 FILE_SHARE_DELETE** 的模式
+        # 持有 knowledge.db。这种句柄下文件「可写但不可改名/删除」，
+        # 所以 os.replace 必然抛 WinError 5 —— 实测连续 8 次全失败，不是瞬时冲突，
+        # 重试没有意义。
+        #
+        # 退路是用 sqlite 的 backup API 把新库内容**原地灌进**已存在的文件：
+        # 它只需要写权限，不需要删除权限，也不会打断那些进程的连接。
+        # 2026-08-09 实测：灌入后 integrity_check=ok、记录数与 tmp 完全一致。
+        source = sqlite3.connect(str(temporary))
+        target = sqlite3.connect(str(DATABASE))
+        try:
+            source.backup(target)
+            target.commit()
+            swapped = target.execute("PRAGMA integrity_check").fetchone()[0]
+        finally:
+            source.close()
+            target.close()
+        if swapped != "ok":
+            raise RuntimeError(
+                f"原地灌入后完整性检查失败：{swapped}。新库仍在 {temporary}，请手工处理"
+            )
+        temporary.unlink(missing_ok=True)
+        print("注：knowledge.db 被其他进程持有，已改用 sqlite backup 原地覆盖（内容一致）")
     output = {"database": str(DATABASE), "tokenizer": tokenizer, **counts}
     if skipped:
         output["skipped_sources"] = skipped

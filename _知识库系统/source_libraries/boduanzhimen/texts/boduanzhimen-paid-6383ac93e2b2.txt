@@ -1,0 +1,9 @@
+[全文第1段 | txt]
+具体的通达信程序如下:
+{更多精品资源:WWW.IDOWN.TOP}
+AA1:=YEAR=年 AND MONTH=月 AND DAY=日;
+AA2:=BARSLAST(AA1);
+AA3:=MOD(AA2,11)+1;
+AA4:=VAR2STR(AA3,0);
+DRAWTEXT(AA2>=0,L,AA4),COLORYELLOW;
+{更多精品资源,公众号:IDOWN分享}

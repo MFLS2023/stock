@@ -1,0 +1,7 @@
+[全文第1段 | txt]
+{更多精品资源:WWW.IDOWN.TOP}
+T1:=REF(C,2)/REF(C,3)>1.099 AND C>O ;
+T2:=REF(V,1)>2*REF(V,2) AND REF(C,1)<REF(O,1);
+T3:=C>REF(C,1) AND L=O;
+T:T1 AND T2 AND T3;
+{更多精品资源,公众号:IDOWN分享}

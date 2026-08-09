@@ -1,0 +1,6 @@
+[全文第1段 | txt]
+公式源码
+M55:=MA(C,55);
+A:=REFDATE(C,1241008);
+XG:=HHV(H,77);
+C>M55 AND C>A AND MA(C,13)>MA(C,55) AND C>XG*0.8;

@@ -1,0 +1,3 @@
+[全文第1段 | txt]
+A:=MA(C,5)>REF(MA(C,5),1);
+XG:COUNT(A,14)>=12 AND C/LLV(L,14)>1.18 AND IF(CODELIKE('8'),0,1) AND IF(CODELIKE('4'),0,1);
