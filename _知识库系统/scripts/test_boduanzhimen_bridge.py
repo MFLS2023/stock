@@ -35,7 +35,9 @@ CI 会被无关依赖拖挂）。
 """
 from __future__ import annotations
 
+import contextlib
 import importlib
+import io
 import pathlib
 import sys
 import unittest
@@ -99,10 +101,20 @@ def _make_case(module_name: str, expected: int) -> type[unittest.TestCase]:
             failures: list[str] = []
             for name, function in functions:
                 with self.subTest(function=name):
+                    # 被桥接的函数会 print 进度（如「KDJ 对东财最大偏离 K=…」）。
+                    # unittest 的 buffer 机制在断言阶段已关闭 stdout，直接调用会抛
+                    # ValueError: I/O operation on closed file —— 那是桥接的缺陷，
+                    # 不是被测代码的问题。所以执行期间把输出收进内存。
+                    captured = io.StringIO()
                     try:
-                        function()
+                        with contextlib.redirect_stdout(captured):
+                            function()
                     except Exception as exc:  # noqa: BLE001 —— 要收集全部失败
-                        failures.append(f"{name}: {type(exc).__name__}: {exc}")
+                        detail = captured.getvalue().strip()
+                        failures.append(
+                            f"{name}: {type(exc).__name__}: {exc}"
+                            + (f"\n    该函数的输出：{detail[-300:]}" if detail else "")
+                        )
                         raise
             self.assertEqual(failures, [], "\n".join(failures))
 
