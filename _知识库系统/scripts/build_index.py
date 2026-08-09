@@ -66,26 +66,16 @@ def create_schema(connection: sqlite3.Connection) -> str:
             locator TEXT NOT NULL,
             text TEXT NOT NULL
         );
-        CREATE TABLE chunks (
-            chunk_id TEXT PRIMARY KEY,
-            source_id TEXT NOT NULL,
-            source_name TEXT,
-            document_id TEXT,
-            parent_id TEXT,
-            chunk_type TEXT NOT NULL,
-            title TEXT NOT NULL,
-            date TEXT,
-            author TEXT,
-            speakers TEXT,
-            topics TEXT,
-            claim_type TEXT,
-            market_regime TEXT,
-            locator TEXT NOT NULL,
-            text TEXT NOT NULL,
-            original_path TEXT,
-            confidence TEXT,
-            image_path TEXT
-        );
+        """
+    )
+    # chunks 表由 CHUNK_COLUMNS 生成，不在这里手写列名 —— 手写会与 add_chunk 的
+    # 插入语句各自漂移，而漂移的后果（FTS 索引错列）不报错。
+    connection.execute(
+        "CREATE TABLE chunks (%s)"
+        % ", ".join(f"{name} {definition}" for name, definition in CHUNK_COLUMNS)
+    )
+    connection.executescript(
+        """
         CREATE INDEX idx_chunks_source ON chunks(source_id);
         CREATE INDEX idx_chunks_author ON chunks(author);
         CREATE INDEX idx_chunks_document ON chunks(document_id);
@@ -115,37 +105,76 @@ def create_schema(connection: sqlite3.Connection) -> str:
         return "unicode61"
 
 
+# chunks 表的列顺序，**唯一事实来源**。create_schema 的建表语句和 add_chunk 的插入
+# 都从这里推导，两处不可能再不一致。
+#
+# 这张表原先是「建表 SQL 写一遍列名 + 插入时写一个 18 元素元组 + FTS 按 row[6]/row[8]/
+# row[14] 取下标」三处各自维护，靠一条注释提醒「新列一律追加在末尾，否则下标错位」。
+# 那是靠人记的约束，不是代码保证的约束 —— 加列时只要手滑插在中间，FTS 就会把
+# locator 当成 text 索引，而且不报错。现在 FTS 按列名取值，插在哪里都不会错。
+CHUNK_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("chunk_id", "TEXT PRIMARY KEY"),
+    ("source_id", "TEXT NOT NULL"),
+    ("source_name", "TEXT"),
+    ("document_id", "TEXT"),
+    ("parent_id", "TEXT"),
+    ("chunk_type", "TEXT NOT NULL"),
+    ("title", "TEXT NOT NULL"),
+    ("date", "TEXT"),
+    ("author", "TEXT"),
+    ("speakers", "TEXT"),
+    ("topics", "TEXT"),
+    ("claim_type", "TEXT"),
+    ("market_regime", "TEXT"),
+    ("locator", "TEXT NOT NULL"),
+    ("text", "TEXT NOT NULL"),
+    ("original_path", "TEXT"),
+    ("confidence", "TEXT"),
+    ("image_path", "TEXT"),
+    # ↓ 2026-08-09 新增。两个字段此前只存在于 chunks.jsonl，检索侧取不到 ——
+    # 文档却写着「日期敏感的结论要先看 date_precision」，那句话在 query_kb.py 里
+    # 是做不到的。
+    #
+    # extraction_method：6 个来源都有值（仅 fulibei 缺），是全库覆盖最广的
+    #   可信度维度 —— 能区分「文本层抽的」和「OCR 认的」，后者数字不可信。
+    # date_precision：目前只有 kongkonglong 有值，其余为空字符串。空值是合法的，
+    #   表示「该来源的导入器没有评估日期精度」，不等于日期可信。
+    ("extraction_method", "TEXT"),
+    ("date_precision", "TEXT"),
+)
+
+# 从 jsonl 取值的方式：多数列同名直取，少数需要兼容旧键名或做列表拼接。
+CHUNK_VALUE_GETTERS = {
+    "author": lambda item: item.get("author_or_guest") or item.get("author", ""),
+    "speakers": lambda item: join_value(item.get("speakers")),
+    "topics": lambda item: join_value(item.get("topics")),
+    "image_path": lambda item: join_value(item.get("image_path")),
+    "chunk_type": lambda item: item.get("chunk_type", "text"),
+}
+
+# 进 FTS 的列。topics 故意不进（自动标签会压过正文命中，见 create_schema）；
+# image_path / extraction_method / date_precision 也不进 —— 它们是路径和枚举值，
+# 不是可检索的自然语言，进了 FTS 只会让「ocr」这类词命中几千块。
+FTS_COLUMNS = ("title", "author", "text")
+
+
 def add_chunk(connection: sqlite3.Connection, item: dict) -> None:
-    row = (
-        item["chunk_id"],
-        item["source_id"],
-        item.get("source_name", ""),
-        item.get("document_id", ""),
-        item.get("parent_id", ""),
-        item.get("chunk_type", "text"),
-        item.get("title", ""),
-        item.get("date", ""),
-        item.get("author_or_guest") or item.get("author", ""),
-        join_value(item.get("speakers")),
-        join_value(item.get("topics")),
-        item.get("claim_type", ""),
-        item.get("market_regime", ""),
-        item.get("locator", ""),
-        item.get("text", ""),
-        item.get("original_path", ""),
-        item.get("confidence", ""),
-        # 新列一律追加在末尾：下面的 FTS 插入按下标取 title/author/text
-        # （row[6]/row[8]/row[14]），在中间插列会让这三个下标错位。
-        join_value(item.get("image_path")),
+    values = {
+        name: CHUNK_VALUE_GETTERS.get(name, lambda item, name=name: item.get(name, ""))(item)
+        for name, _ in CHUNK_COLUMNS
+    }
+    # chunk_id 与 source_id 是必需的，缺了要炸而不是写空字符串
+    values["chunk_id"] = item["chunk_id"]
+    values["source_id"] = item["source_id"]
+    placeholders = ",".join("?" for _ in CHUNK_COLUMNS)
+    connection.execute(
+        f"INSERT INTO chunks VALUES ({placeholders})",
+        tuple(values[name] for name, _ in CHUNK_COLUMNS),
     )
     connection.execute(
-        "INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", row
-    )
-    # row[10] 是 topics，故意不写进 FTS——见 create_schema 的说明。
-    # image_path 同样不进 FTS：它是文件路径，不是可检索的自然语言。
-    connection.execute(
-        "INSERT INTO chunks_fts(chunk_id,title,author,text) VALUES (?,?,?,?)",
-        (row[0], row[6], row[8], row[14]),
+        f"INSERT INTO chunks_fts(chunk_id,{','.join(FTS_COLUMNS)}) "
+        f"VALUES (?,{','.join('?' for _ in FTS_COLUMNS)})",
+        (values["chunk_id"], *(values[name] for name in FTS_COLUMNS)),
     )
 
 

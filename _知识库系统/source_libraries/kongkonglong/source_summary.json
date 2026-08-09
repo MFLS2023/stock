@@ -1,0 +1,27 @@
+{
+  "generated_at": "2026-08-09T10:02:37.054207+00:00",
+  "source_id": "kongkonglong",
+  "upstream_path": "C:\\Users\\20577\\Documents\\炒股\\主升龙头空空龙",
+  "candidates": 14,
+  "documents": 14,
+  "documents_with_chunks": 10,
+  "parents": 32,
+  "chunks": 172,
+  "stats": {
+    "doc_converted": 1,
+    "images_exported": 10,
+    "skipped_superseded": 2,
+    "skipped_duplicate_fingerprint": 2,
+    "chunk_method_article": 167,
+    "chunk_market_commentary": 5
+  },
+  "noise_removed": {
+    "platform": 12,
+    "paragraph_dropped_all_noise": 12,
+    "disclaimer": 4,
+    "paragraph_split": 11,
+    "promo": 16
+  },
+  "errors": [],
+  "error_count": 0
+}

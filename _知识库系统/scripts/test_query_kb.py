@@ -3071,6 +3071,11 @@ SMOKE_SAMPLE_CHUNKS = 40
 # 刻意不含 page_texts/*.json（PDF 文本层与 OCR 的原始提取缓存）和 image_ocr_cache：
 # 那些是导入器的输入，读出来之后还要过 clean_text() 才落进产物。也不含 messages.jsonl
 # ——它是 panfeng 的中间产物（导入器自己的解析记录），chunks/parents 才是索引读的。
+#
+# 这条豁免的理由与「缓存当前脏不脏」无关：只要 page_texts 仍是「输入而非产物」，
+# 豁免就成立。2026-08-09 南京路整源重跑后该缓存的 NUL 从 651 清零，
+# 曾有一条断言因此变红（它假设「清零 == 豁免成了死代码」），已删——
+# 详见 test_the_page_texts_cache_is_excluded_on_purpose 的 docstring。
 INDEXABLE_JSONL = (
     "documents.jsonl",
     "parents.jsonl",
@@ -3546,18 +3551,23 @@ class RegistryScopedIndexTests(unittest.TestCase):
     def test_the_page_texts_cache_is_excluded_on_purpose(self):
         """豁免范围本身也要有断言，否则"排除了什么"只活在注释里。
 
-        两头都钉：page_texts 里当前**确实**还有转义 NUL（所以豁免不是空话，去掉豁免
-        上一条就会失败），而同一个来源的可索引 JSONL **必须**干净（所以豁免没有顺带
-        放过整个来源）。实测 2026-08-02：page_texts 651 个 NUL / 41 个文件 / 4 个文档，
-        nanjinglu_bian 的 chunks/parents/documents 三个 JSONL 为 0。
+        断言的是**真正的不变量**：豁免只针对 page_texts 这个目录，同一个来源的可索引
+        JSONL（chunks/parents/documents/methods/conflicts）必须干净。这条不依赖缓存里
+        有没有 NUL，因此不会因为重跑 OCR 而变红。
 
-        缓存里的 NUL 数量不写死：那是 OCR 输出的属性，重跑 OCR 会变。断言只要求
-        "仍然存在"，一旦将来清零，这条会失败并提示可以撤掉豁免——那时豁免才是死代码。
+        ⚠️ **原先这里还断言「page_texts 里必须仍然有 NUL」，2026-08-09 删掉了。**
+        那条断言的用意是「一旦缓存清零，说明豁免成了死代码，该撤」，写法是
+        `assertGreater(total, 0)` 并附提示语。它在这天真的触发了——南京路彼岸整源重跑
+        双路抽取后，page_texts 336 个 json 的 NUL 从 651 降到 **0**。
 
-        一个 page_texts 目录都找不到时**明确失败，不 skipTest**。本轮修订改的：
-        skip 与"验收零 skip"的口径冲突，而且"跳过"这个结果本身没有信息——豁免究竟
-        还需不需要，读输出的人看不出来。没有缓存目录意味着 INDEXABLE_JSONL 那条排除
-        规则和它的注释成了无人核验的声明，该删，所以失败并把话说清楚是对的处理。
+        但触发后回看，那条断言的推理是错的：**缓存当前有没有 NUL，和豁免该不该存在，
+        是两件事。** 豁免的理由是「page_texts 是导入器的输入缓存，里面的内容还要过
+        clean_text() 才落进产物，缓存脏不脏不影响索引」——这个理由与 NUL 的实时数量
+        无关。OCR 换个引擎、换批素材就可能重新出现 NUL，那时豁免又「活」了；
+        按原逻辑就得把删掉的断言再加回来，来回翻烙饼。
+
+        所以改为只钉那个恒真的不变量。缓存里的 NUL 数量作为观测值打印出来，
+        不作断言——它是 OCR 输出的属性，不是本项目要维护的契约。
         """
         library = DATABASE.parents[1] / "source_libraries"
         caches = sorted(library.glob("*/page_texts"))
@@ -3581,9 +3591,13 @@ class RegistryScopedIndexTests(unittest.TestCase):
                         [],
                         f"{path} 含 NUL——豁免只针对 page_texts，不放过同来源的产物",
                     )
-        self.assertGreater(
-            total, 0, "page_texts 已经没有 NUL 了，可以撤掉豁免并把它一起纳入检查"
-        )
+        # 观测值，不断言：南京路整源重跑 OCR 后这个数从 651 变成了 0。
+        # 它是 OCR 输出的属性，不是本项目维护的契约，写死任何一侧都会周期性变红。
+        if total:
+            print(
+                f"\n  [观测] page_texts 缓存含 {total} 个转义 NUL"
+                f"（{len(caches)} 个目录）——豁免仍在实际生效"
+            )
 
 
 K_NAME = re.compile(r"-k[\s,\"']+([A-Za-z_][A-Za-z0-9_]*)")

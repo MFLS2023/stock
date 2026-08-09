@@ -110,12 +110,13 @@ sources:
     upstream_path: C:\Users\20577\Documents\炒股\主升龙头空空龙
     last_import_summary:
       documents: 14
-      documents_with_chunks: 9
-      chunks: 163
+      documents_with_chunks: 10
+      chunks: 172
       errors: 0
     notes: 单作者方法论长文（docx/txt），无 PDF、无留言区。原始目录是从 KB 外复制的副本，
       upstream_path 记上游位置。同源冗余按抽取后文本指纹判重（文件 hash 判不出来）；
-      防爆头 2.0 被 20260418 版覆盖 90% 故不建块；10 张行情截图未 OCR 只记路径。
+      防爆头 2.0 被 20260418 版覆盖约 90% 故不建块（对照全部已建块文档后独有 1576 字，
+      实质仅 3 段 1426 字，都是同一章节的改写版）；10 张行情截图未 OCR 只记路径。
 
   # 两个原始目录用 junction 挂进 波段之门/ 下：公众号文章/ 和 付费文章/，
   # 原文件一律只读，删掉 junction 不影响上游。

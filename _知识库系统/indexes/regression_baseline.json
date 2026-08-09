@@ -9,7 +9,7 @@
   "_更新规则": [
     "1. 只有在确认数据变动是**有意的**（新导入、修了导入器缺陷）时才更新",
     "2. 更新必须同时填 history 里的一条，写明 why —— 没有 why 的更新等于取消这项保护",
-    "3. 跑 `python _知识库系统/scripts/refresh_regression_baseline.py --check` 看差异",
+    "3. 跑 `python _知识库系统/scripts/refresh_regression_baseline.py`（不带参数就是对账模式，列出差异；此前这里写的 --check 是个不存在的参数，会报 unrecognized arguments）",
     "4. 确认无误后跑同一脚本加 `--write` 写入，然后连同 history 一起提交"
   ],
   "baseline_time": "2026-08-09",
@@ -21,12 +21,12 @@
   "row_counts": {
     "chunks": {
       "fulibei": 1470,
-      "nanjinglu_bian": 551,
+      "nanjinglu_bian": 586,
       "tulip_garden": 1181
     },
     "parents": {
       "fulibei": 441,
-      "nanjinglu_bian": 83,
+      "nanjinglu_bian": 95,
       "tulip_garden": 155
     },
     "documents": {
@@ -36,25 +36,25 @@
     }
   },
   "prose_matches": {
-    "竞价": 395,
-    "筹码": 369,
-    "龙头": 630,
+    "竞价": 393,
+    "筹码": 370,
+    "龙头": 613,
     "打板": 186,
-    "情绪": 896
+    "情绪": 877
   },
   "title_only_extra": {
     "竞价": 58,
     "筹码": 48,
     "龙头": 310,
-    "情绪": 405
+    "情绪": 418
   },
   "recall_union": {
-    "情绪周期": 519,
+    "情绪周期": 517,
     "龙头与核心": 0,
-    "弱转强": 117,
+    "弱转强": 119,
     "筹码断层": 52
   },
-  "topics_filled": 3202,
+  "topics_filled": 3237,
   "history": [
     {
       "date": "2026-08-02",
@@ -82,6 +82,15 @@
         "tulip_garden": 1181
       },
       "why": "南京路彼岸增量导入 1 篇《风起云涌(1)》(document_id nanjinglu-edc0dc8d5c09, date 2026-08-09, 26 块), 导致 chunks 525→551 / parents 80→83 / documents 42→43。这是已审批来源的正常增量, 不是污染 —— 已核对该文档的 12 个 page_texts 与 1 个 texts 产物齐全。连带 prose_matches 与 recall_union 里几个词各涨几到十几块(情绪周期 516→519、弱转强 111→117、龙头 616→630、情绪 889→896、筹码 367→369、topics_filled 3176→3202)。SPEC 第 76-78 行预见过『未审批来源自动进索引』, 但没覆盖『已审批来源被增量导入』这种情况, 故本次把基线外置以便留痕。"
+    },
+    {
+      "date": "2026-08-09 (第二次, 17:30)",
+      "chunks": {
+        "fulibei": 1470,
+        "nanjinglu_bian": 586,
+        "tulip_garden": 1181
+      },
+      "why": "南京路彼岸**整源重跑了双路抽取**(不是又加文章)。判据: documents 仍是 43 篇、新增文档只有 1 篇(《风起云涌》), 但**43 篇里几乎每篇的字符数都变了**, 有涨有跌 —— 情绪周期下\"如何选股\" 26104→36675(+40%)、熟悉的味 14934→26697(+79%), 而 情绪周期在产业趋势投资中的应用 反而 30490→24237(-20%)。三类块全增: article/high 238→252、article/medium 101→107、screenshot_ocr/low **186→227(字符 58616→99736, +70%)**, 该来源总字符 228602→284193(+24%)。增幅集中在 screenshot_ocr 说明这次重跑让 OCR 认出了更多截图内容。\n\n⚠️ **这解释了为什么有几个词的命中数是下降的**(情绪 896→877、龙头 630→613、情绪周期 519→517): 双路抽取重跑后同一页的文本层/OCR 切块边界变了, 高频词在\"块级别\"的分布随之改变 —— 词的总出现次数没少(情绪 482 次 / 龙头 488 次), 是承载它们的块数变了。**命中块数下降不等于内容丢失**, 这一点在对账时必须区分, 否则会误判为污染。\n\n这次变动不是本轮接入第 7 个来源(kongkonglong)造成的: 用改动前的索引备份 knowledge.db.backup-before-cols 跑同一套测试, 失败项完全相同(11 项), 说明基线在 kongkonglong 接入前就已被打破。kongkonglong 不在 sources 样本里(样本只有 fulibei/nanjinglu_bian/tulip_garden), 本身不影响这些数字。同期给 chunks 表加了 extraction_method / date_precision 两列, 已验证 FTS 三字段与 chunks 逐块一致(18920 块比对, 0 处错位), 不影响任何计数。"
     }
   ]
 }

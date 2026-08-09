@@ -1,0 +1,19 @@
+id: kongkonglong
+display_name: 主升龙头空空龙
+source_path: 主升龙头空空龙
+source_type: method_article_docx
+status: integrated
+original_policy: read_only
+primary_locator: paragraph_number
+pipeline: docx_method_articles
+adapter: specialized_kongkonglong
+author: 主升龙头空空龙
+upstream_path: C:\Users\20577\Documents\炒股\主升龙头空空龙
+last_import_summary:
+  documents: 14
+  documents_with_chunks: 10
+  chunks: 172
+  errors: 0
+notes: 单作者方法论长文（docx/txt），无 PDF、无留言区。原始目录是从 KB 外复制的副本， upstream_path 记上游位置。同源冗余按抽取后文本指纹判重（文件
+  hash 判不出来）； 防爆头 2.0 被 20260418 版覆盖约 90% 故不建块（对照全部已建块文档后独有 1576 字， 实质仅 3 段 1426 字，都是同一章节的改写版）；10
+  张行情截图未 OCR 只记路径。
