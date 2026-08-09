@@ -44,7 +44,20 @@ TARGET_CHARS = 1200          # 与项目其他来源一致
 MIN_CHUNK_CHARS = 400        # 低于此值的块并入相邻块
 MAX_CHUNK_CHARS = 1600
 MIN_DOC_CHARS = 100          # 清洗后正文不足此数的文档跳过
-MIN_AUTHOR_REPLY = 25        # 作者回复短于此值不单独入库（"嗯""是的"这类）
+MIN_AUTHOR_REPLY = 3         # 作者回复短于此值不入库
+# ⚠️ 这个值 2026-08-09 从 25 降到 3。原值丢掉了他 78% 的回复。
+#
+# 实测（抽样 120 篇）：作者回复 2562 条，MIN_AUTHOR_REPLY=25 只放过 561 条（21.9%），
+# 丢掉 2001 条。而被丢的不是噪声，大量是实质内容 ——
+#     「能封住的板，明天都应该有溢价」（14字，交易规则）
+#     「1进2难选所以才性价比高啊」（13字，赔率判断）
+#     「理论上是有，但是就怕走成了省广」（15字，条件判断带具名对照）
+#     「看情况，暂时不打算卖。。。」（13字，他的实际持仓决策）
+# 25 个汉字对中文是一整句话，这个阈值本意滤「嗯」「是的」，实际滤掉了他最直接的回答。
+#
+# 真噪声不是「短」，是**楼层报数**：`答：「2」←问：「5」`、`答：「1楼」`、`答：「3楼」`。
+# 那类由 FLOOR_REPLY_RE 按模式排除，与长度无关。保留 3 字下限只为挡住空串和单字。
+FLOOR_REPLY_RE = re.compile(r"^\d{1,3}\s*(楼|楼上|f|F)?[。.，,！!~\s]*$")
 
 # 图文映射：由 build_azbc_image_map.py 生成，记录每张本地图片落在正文第几段之后。
 # 公众号 .md 里的图片是远程链接，clean_wechat_markdown 整体删除，正文里不留痕迹；
@@ -330,7 +343,8 @@ def extract_author_replies(comment_lines: list[str]) -> list[dict]:
             body = trimmed
 
         if speaker == SOURCE_NAME:
-            if len(body) >= MIN_AUTHOR_REPLY:
+            # 楼层报数按模式排除，不按长度 —— 见 MIN_AUTHOR_REPLY 处的说明
+            if len(body) >= MIN_AUTHOR_REPLY and not FLOOR_REPLY_RE.match(body):
                 pairs.append({"question": pending_question, "answer": body})
             pending_question = ""
         elif body:

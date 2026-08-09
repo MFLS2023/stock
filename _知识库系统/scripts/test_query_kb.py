@@ -86,7 +86,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import yaml
 
 import query_kb  # 同义词扩展的测试要改模块级常量，需要模块对象本身
-from build_index import add_chunk, create_schema
+from build_index import ALLOWED_STATUSES, add_chunk, create_schema
 from query_kb import (
     ASCII_FOLD,
     FIELD_WEIGHTS,
@@ -2301,7 +2301,16 @@ def source_registry() -> dict[str, dict[str, str]]:
     inside = False
     nested_above: int | None = None  # indent of the block whose children we are skipping
     for raw in SOURCES_CONFIG.read_text(encoding="utf-8").splitlines():
-        if not raw.startswith((" ", "\t", "#")) and raw.strip():
+        # 顶层键判定必须排除列表项。YAML 允许 sources: 的列表项不缩进：
+        #     sources:
+        #     - id: fulibei          <- 合法，且 yaml.dump 默认就这么写
+        # 旧写法只看「行首无空白」，会把 `- id: fulibei` 当成新的顶层键，
+        # 于是 inside 被重置为 False，整个 sources 块一条都读不出来。
+        # 2026-08-09 实测踩到：另一个会话用 yaml.safe_load + dump 重写了
+        # sources.yaml（注册第 6 个来源），缩进从 2 空格变 0 空格，
+        # registered_sources() 直接返回空元组，5 个登记表测试同时失败。
+        if (not raw.startswith((" ", "\t", "#")) and raw.strip()
+                and not raw.lstrip().startswith("- ")):
             inside = raw.split(":", 1)[0].strip() == "sources"
             current = None
             nested_above = None
@@ -2333,6 +2342,26 @@ def source_registry() -> dict[str, dict[str, str]]:
 def registered_sources() -> tuple[str, ...]:
     """Every registered source id, sorted for stable test output."""
     return tuple(sorted(source_registry()))
+
+
+def indexable_sources() -> tuple[str, ...]:
+    """已注册**且** build_index 会真正导入的来源。
+
+    「注册」和「入索引」不是一回事：`build_index.py` 按 `ALLOWED_STATUSES`
+    过滤，status 不在白名单的来源会被跳过并记入 `metadata.skipped_sources`。
+    所以「每个来源都能单独查到」这类断言的分母必须是这个函数，不是
+    `registered_sources()`。
+
+    2026-08-09 踩到：另一个会话正在接入第 6 个来源 boduanzhimen，
+    它已写进 sources.yaml（status='integrated_with_warnings'）但尚未获批入索引，
+    结果 RegistryScopedIndexTests 的 5 项断言同时失败 —— 那不是缺陷，
+    是「正在接入中的来源」这个正常状态。测试不该因为有来源在 onboarding 就变红。
+    """
+    registry = source_registry()
+    return tuple(sorted(
+        source_id for source_id, fields in registry.items()
+        if fields.get("status") in ALLOWED_STATUSES
+    ))
 
 
 # SPEC 3.0 requires zero skips at acceptance. Without this switch a missing index
@@ -2876,6 +2905,16 @@ class RealIndexTests(unittest.TestCase):
         # 比较、instr 按 blob 看完整内容，于是 instr 口径下多出一条差异。那条差异是
         # 真实的召回遗漏（NUL 后的正文永远搜不到），LIKE 只是把它一起藏了起来。NUL
         # 现在由 clean_text 在导入时删除，两个口径重新一致，所以基准回到 instr。
+        # ⚠️ 基准必须 lower() 两侧，否则含 ASCII 字母的验收词会误报。
+        # 2026-08-09 实测：`A?` 的 search() 多返回两块，它们含的是小写 `a?`
+        # （「会不会影响大a?」`azbc-5ff5408091a1-q001-c01`、「weisha?」
+        # `azbc-53ec31a2f566-q001-c02`）。glob_pattern() 按 SPEC 要求把 ASCII 字母
+        # 折成 `[Aa]`，所以 search 对大小写不敏感是**设计**；而 instr 区分大小写，
+        # 于是基准比被测行为更严格，等值断言测的就不是同一件事
+        # （与 test_ascii_case_forms_recall_the_same_chunks_on_the_real_corpus 同一个道理，
+        # 那条早就写了 lower()）。
+        # 这两块一直存在，今天才暴露：短回复恢复入库后重新切块，`a?` 落到了不同的
+        # chunk 边界上，之前恰好和长回复挤在同一块里而那块另含大写 `A?`。
         total = self.connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
         for term in ("*", "?", "[", "**", "竞*", "A?"):
             with self.subTest(term=term):
@@ -2883,7 +2922,9 @@ class RealIndexTests(unittest.TestCase):
                     row[0]
                     for row in self.connection.execute(
                         "SELECT chunk_id FROM chunks "
-                        "WHERE instr(text, ?) > 0 OR instr(title, ?) > 0 OR instr(author, ?) > 0",
+                        "WHERE instr(lower(text), lower(?)) > 0 "
+                        "OR instr(lower(title), lower(?)) > 0 "
+                        "OR instr(lower(author), lower(?)) > 0",
                         [term] * 3,
                     )
                 }
@@ -3116,7 +3157,9 @@ class RegistryScopedIndexTests(unittest.TestCase):
         cls.connection = sqlite3.connect(f"file:{DATABASE}?mode=ro", uri=True)
         cls.connection.row_factory = sqlite3.Row
         cls.registry = source_registry()
-        cls.registered = tuple(sorted(cls.registry))
+        # 分母是「会被 build_index 导入的来源」，不是「登记表里的全部来源」。
+        # 正在 onboarding、status 尚未获批的来源不该让本类变红 —— 见 indexable_sources()。
+        cls.registered = indexable_sources()
 
     @classmethod
     def tearDownClass(cls):
