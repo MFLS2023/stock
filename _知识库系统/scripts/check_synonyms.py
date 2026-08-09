@@ -38,6 +38,33 @@ def hits(db: sqlite3.Connection, term: str) -> int:
     ).fetchone()[0]
 
 
+def author_uses(db: sqlite3.Connection, term: str) -> bool:
+    """这个词有没有被作者本人用过（而不是只出现在读者提问里）。
+
+    为什么需要：`qa_reply` / `author_reply` 块是「问：xxx 答：yyy」格式，
+    只有「答：」后面是作者说的。若某词只出现在「问：」段，它是**读者用词**，
+    把它加进同义词表只会让检索捞到读者的话，不是作者观点。
+
+    实例：「由弱转强」全库 1 块，在 aizaibingchuan 的 qa_reply 里，
+    位于「问：」段 —— 作者从未用过这个说法（他用「弱转强」）。
+    """
+    rows = db.execute(
+        "SELECT text FROM chunks WHERE instr(text, ?) > 0", (term,)
+    ).fetchall()
+    for (text,) in rows:
+        start = 0
+        while True:
+            index = text.find(term, start)
+            if index < 0:
+                break
+            before = text[:index]
+            # 取最近的「问：」和「答：」，谁更靠后就归谁
+            if before.rfind("答：") >= before.rfind("问："):
+                return True   # 出现在答句里，或该块没有问答结构（当作正文）
+            start = index + len(term)
+    return False
+
+
 def distribution(db: sqlite3.Connection, term: str) -> dict[str, int]:
     rows = db.execute(
         "SELECT source_id, COUNT(*) FROM chunks WHERE instr(text, ?) > 0 "
@@ -69,6 +96,7 @@ def main() -> int:
 
     zero_in_groups: list[tuple[str, str]] = []
     revived: list[tuple[str, int]] = []
+    reader_only: list[tuple[str, int]] = []
     single_source: list[tuple[str, str, int]] = []
 
     for name, group in groups.items():
@@ -90,8 +118,15 @@ def main() -> int:
 
     for term in dead:
         n = hits(db, term)
-        if n > 0:
+        if n == 0:
+            continue
+        # 有命中不等于该移回 groups：若全部命中都在「问：」之后，那是**读者用词**，
+        # 作者本人没说过，扩展它只会捞到读者的话。
+        # 实例：「由弱转强」1 块，出现在 aizaibingchuan 的 qa_reply 里、且在「问：」段。
+        if author_uses(db, term):
             revived.append((term, n))
+        else:
+            reader_only.append((term, n))
 
     print("=" * 60)
     problems = 0
@@ -108,9 +143,15 @@ def main() -> int:
         problems += len(revived)
         print(f"\n⚠️ dead_terms 里有 {len(revived)} 个词已复活（应移回 groups）：")
         for term, n in revived:
-            print(f"    {term}  {n} 块")
+            print(f"    {term}  {n} 块  ← 作者本人用过")
     else:
-        print("✓ dead_terms 全部仍为零命中")
+        print("✓ dead_terms 没有被作者用过的词")
+
+    if reader_only:
+        print(f"\nℹ️ dead_terms 里 {len(reader_only)} 个词有命中但**只出现在读者提问里**"
+              f"（作者没用过，正确地留在死词区）：")
+        for term, n in reader_only:
+            print(f"    {term}  {n} 块")
 
     if single_source:
         print(f"\nℹ️ 单来源独有词 {len(single_source)} 个（拿它们检索等于只查一个来源）：")
