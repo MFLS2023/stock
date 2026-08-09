@@ -1,0 +1,87 @@
+{
+  "_说明": "回归样本基线快照。测试 test_query_kb.RealIndexTests 断言当前索引与本文件一致。",
+  "_为什么外置": [
+    "原来这些数字写死在 test_query_kb.py 里（1470/525/1181 等）。",
+    "问题：合法的增量导入也会让测试变红，而修法只能是编辑测试代码——",
+    "那让『改基线』和『改测试逻辑』混在同一个 diff 里，审阅时分不清哪个是哪个。",
+    "外置后：数据变动只改这份 JSON，测试代码不动。JSON 的 diff 就是一份变更账。"
+  ],
+  "_更新规则": [
+    "1. 只有在确认数据变动是**有意的**（新导入、修了导入器缺陷）时才更新",
+    "2. 更新必须同时填 history 里的一条，写明 why —— 没有 why 的更新等于取消这项保护",
+    "3. 跑 `python _知识库系统/scripts/refresh_regression_baseline.py --check` 看差异",
+    "4. 确认无误后跑同一脚本加 `--write` 写入，然后连同 history 一起提交"
+  ],
+  "baseline_time": "2026-08-09",
+  "sources": [
+    "fulibei",
+    "nanjinglu_bian",
+    "tulip_garden"
+  ],
+  "row_counts": {
+    "chunks": {
+      "fulibei": 1470,
+      "nanjinglu_bian": 551,
+      "tulip_garden": 1181
+    },
+    "parents": {
+      "fulibei": 441,
+      "nanjinglu_bian": 83,
+      "tulip_garden": 155
+    },
+    "documents": {
+      "fulibei": 110,
+      "nanjinglu_bian": 43,
+      "tulip_garden": 42
+    }
+  },
+  "prose_matches": {
+    "竞价": 395,
+    "筹码": 369,
+    "龙头": 630,
+    "打板": 186,
+    "情绪": 896
+  },
+  "title_only_extra": {
+    "竞价": 58,
+    "筹码": 48,
+    "龙头": 310,
+    "情绪": 405
+  },
+  "recall_union": {
+    "情绪周期": 519,
+    "龙头与核心": 0,
+    "弱转强": 117,
+    "筹码断层": 52
+  },
+  "topics_filled": 3202,
+  "history": [
+    {
+      "date": "2026-08-02",
+      "chunks": {
+        "fulibei": 1470,
+        "nanjinglu_bian": 525,
+        "tulip_garden": 1181
+      },
+      "why": "SPEC 0.1 节确立的原始冻结基线，git 标签 p0-fixed-20260802。样本块数 3176。"
+    },
+    {
+      "date": "2026-08-08",
+      "chunks": {
+        "fulibei": 1470,
+        "nanjinglu_bian": 525,
+        "tulip_garden": 1181
+      },
+      "why": "复利杯 20 张方法卡从 status=draft 审批为 reviewed 后进索引，fulibei 由 1450 回到 1470（= transcript 1444 + 方法卡 20 + 分歧卡 6），正好回到 SPEC 原始冻结值。"
+    },
+    {
+      "date": "2026-08-09",
+      "chunks": {
+        "fulibei": 1470,
+        "nanjinglu_bian": 551,
+        "tulip_garden": 1181
+      },
+      "why": "南京路彼岸增量导入 1 篇《风起云涌(1)》(document_id nanjinglu-edc0dc8d5c09, date 2026-08-09, 26 块), 导致 chunks 525→551 / parents 80→83 / documents 42→43。这是已审批来源的正常增量, 不是污染 —— 已核对该文档的 12 个 page_texts 与 1 个 texts 产物齐全。连带 prose_matches 与 recall_union 里几个词各涨几到十几块(情绪周期 516→519、弱转强 111→117、龙头 616→630、情绪 889→896、筹码 367→369、topics_filled 3176→3202)。SPEC 第 76-78 行预见过『未审批来源自动进索引』, 但没覆盖『已审批来源被增量导入』这种情况, 故本次把基线外置以便留痕。"
+    }
+  ]
+}

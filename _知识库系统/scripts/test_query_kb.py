@@ -2271,6 +2271,34 @@ SOURCES_CONFIG = Path(__file__).resolve().parents[2] / "_知识库系统" / "con
 REGRESSION_SAMPLE = ("fulibei", "nanjinglu_bian", "tulip_garden")
 SAMPLE_PLACEHOLDERS = ",".join("?" for _ in REGRESSION_SAMPLE)
 
+
+def load_regression_baseline() -> dict:
+    """读外置的回归基线快照 `indexes/regression_baseline.json`。
+
+    ## 为什么外置而不写死在本文件里
+
+    这些数字原来是硬编码的（1470/525/1181、prose 395/369/…、recall 516/111/… 等）。
+    问题不是"数字会变"，而是**合法的数据变动只能通过编辑测试代码来修**：
+    2026-08-09 南京路彼岸增量导入 1 篇（26 块），9 项断言同时变红，
+    而唯一的修法是改这个文件里十几处常量 —— 于是「更新基线」和「改测试逻辑」
+    混在同一个 diff 里，审阅时分不清哪个是哪个。
+
+    外置后：数据变动只改 JSON，本文件不动，JSON 的 diff 就是一份可审计的变更账，
+    且它带 `history` 字段强制要求写明每次变动的 why。
+
+    对账/刷新：`python scripts/refresh_regression_baseline.py [--write]`
+
+    快照缺失时抛错而不是跳过 —— 静默跳过等于悄悄取消这项保护。
+    """
+    path = DATABASE.with_name("regression_baseline.json")
+    if not path.exists():
+        raise FileNotFoundError(
+            f"回归基线快照不存在：{path}\n"
+            "它是 RealIndexTests 的断言依据，不能缺。"
+            "跑 scripts/refresh_regression_baseline.py --write 生成。"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
 # The two-character terms that expose the recall defect (SPEC 阶段 2). Named once so that
 # the two expectedFailure cases — sample scope and registry scope — and the plain guards
 # that keep them from going vacuous all iterate over exactly the same list.
@@ -2496,20 +2524,14 @@ class RealIndexTests(unittest.TestCase):
         # 1000/995/1181 — content could shift between sources and the total would not
         # move. The frozen baseline is the three numbers, so the three numbers are what
         # gets checked.
-        # 这个数字随方法卡审批状态摆动过一轮，两次都不是缺陷：
-        #   2026-08-04  20 张方法卡加上 status 字段、初始为 draft，被 status 过滤
-        #               挡在索引外，块数 1470 → 1450，当时把基线临时改成 1450。
-        #   2026-08-08  用户逐张审批完，20 张全部 status=reviewed 重新进索引，
-        #               块数回到 1470 —— 也就是 SPEC 0.1 节冻结的原始基线
-        #               （1470 / 525 / 1181 = 3176）。
-        # 所以这里改回 1470 不是"改测试迁就代码"，是回到 SPEC 的冻结值。
-        # 若将来有卡被改成 revised / rejected，这个数字会再次下降，届时按
-        # 「reviewed 卡数」重新对账，不要直接把实测值抄进来。
-        expected = {
-            "chunks": {"fulibei": 1470, "nanjinglu_bian": 525, "tulip_garden": 1181},
-            "parents": {"fulibei": 441, "nanjinglu_bian": 80, "tulip_garden": 155},
-            "documents": {"fulibei": 110, "nanjinglu_bian": 42, "tulip_garden": 42},
-        }
+        # 这些数字摆动过两轮，都不是缺陷 —— 完整变更账见
+        # indexes/regression_baseline.json 的 history 字段：
+        #   2026-08-02  SPEC 0.1 节确立原始冻结值 1470 / 525 / 1181 = 3176
+        #   2026-08-04  20 张方法卡加 status 字段、初始 draft 被过滤，fulibei 1470→1450
+        #   2026-08-08  审批完 20 张 reviewed 重新进索引，回到 1470
+        #   2026-08-09  南京路增量导入 1 篇（26 块），nanjinglu_bian 525→551
+        # 从 08-09 起基线外置到 JSON，不再写死在本文件 —— 理由见 load_regression_baseline()
+        expected = load_regression_baseline()["row_counts"]
         for table, per_source in expected.items():
             with self.subTest(table=table):
                 actual = dict(
@@ -2540,7 +2562,8 @@ class RealIndexTests(unittest.TestCase):
         #   2026-08-08  用户审批完，20 张 reviewed 重新进索引 -> 回到 SPEC 冻结值。
         # 方法卡正文里确实写着这些词（实测方法卡贡献：竞价 1、龙头 1、打板 3、情绪 4、
         # 情绪周期 2、弱转强 1），所以它进不进索引会直接改变分母。
-        for term, expected in [("竞价", 395), ("筹码", 367), ("龙头", 616), ("打板", 186), ("情绪", 889)]:
+        # 2026-08-09 起这些值外置到 regression_baseline.json，变更账见其 history。
+        for term, expected in load_regression_baseline()["prose_matches"].items():
             with self.subTest(term=term):
                 self.assertEqual(self.prose_matches(term), expected)
 
@@ -2587,7 +2610,8 @@ class RealIndexTests(unittest.TestCase):
         # 龙头的 310 不变——它那一块清洁前后都是正文含词。
         # 方法卡审批状态同样影响这两个数：2026-08-04 卡改 draft 时 龙头 310→298、
         # 情绪 405→397；2026-08-08 审批为 reviewed 后回到 SPEC 冻结的 310 / 405。
-        for term, extra in [("竞价", 58), ("筹码", 48), ("龙头", 310), ("情绪", 405)]:
+        # 2026-08-09 起外置到 regression_baseline.json 的 title_only_extra。
+        for term, extra in load_regression_baseline()["title_only_extra"].items():
             with self.subTest(term=term):
                 self.assertEqual(
                     len(self.recall_target_ids(term)) - self.prose_matches(term), extra
@@ -2701,8 +2725,8 @@ class RealIndexTests(unittest.TestCase):
         # 断言写成"等于并集"而不是写死数字：并集本身由 test_prose_match_baselines_hold
         # 和 test_recall_target_exceeds_prose_for_high_traffic_terms 钉住，这里要证明的是
         # FTS 命中与并集严格相等——多一条说明 topics 漏进来了，少一条说明人写字段被砍了。
-        expected = {"情绪周期": 516, "龙头与核心": 0, "弱转强": 111, "筹码断层": 52}
-        for term, count in expected.items():
+        # 2026-08-09 起外置到 regression_baseline.json 的 recall_union。
+        for term, count in load_regression_baseline()["recall_union"].items():
             with self.subTest(term=term):
                 union = len(self.recall_target_ids(term))
                 self.assertEqual(union, count)
@@ -2733,7 +2757,8 @@ class RealIndexTests(unittest.TestCase):
             f"AND topics != ''",
             REGRESSION_SAMPLE,
         ).fetchone()[0]
-        self.assertEqual(filled, 3176)
+        # 2026-08-09 起外置到 regression_baseline.json 的 topics_filled。
+        self.assertEqual(filled, load_regression_baseline()["topics_filled"])
 
     def test_integrity_check_passes(self):
         # SPEC 3.1 阶段 1 验收表最后两行之一。重建索引本身会跑一次，但那是构建期的库；
