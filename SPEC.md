@@ -1304,7 +1304,7 @@ S="-s _知识库系统/scripts -t _知识库系统/scripts"
 FIXTURE="-k FixtureShapeTests -k IndexPollutionTests -k ShortTermSearchTests \
          -k SourceCoverageTests -k RetrievalContractTests -k GlobEscapingTests \
          -k AsciiCaseRecallTests -k SubsetMarkerTests -k SourceRegistryTests"
-REAL="-k RealIndexRequirementTests -k RealIndexTests -k RegistryScopedIndexTests"
+REAL="-k RealIndexRequirementTests -k RealIndexTests -k RegistryScopedIndexTests -k ChunkFieldGuardTests -k WritingYearTests"
 
 # 1. fixture 单元测试（纯内存，不碰 knowledge.db）
 "$PY" -m unittest discover $S $FIXTURE -v
@@ -1339,7 +1339,7 @@ $S = @("-s","_知识库系统/scripts","-t","_知识库系统/scripts")
 $FIXTURE = @("-k","FixtureShapeTests","-k","IndexPollutionTests","-k","ShortTermSearchTests",
              "-k","SourceCoverageTests","-k","RetrievalContractTests","-k","GlobEscapingTests",
              "-k","AsciiCaseRecallTests","-k","SubsetMarkerTests","-k","SourceRegistryTests")
-$REAL = @("-k","RealIndexRequirementTests","-k","RealIndexTests","-k","RegistryScopedIndexTests")
+$REAL = @("-k","RealIndexRequirementTests","-k","RealIndexTests","-k","RegistryScopedIndexTests","-k","ChunkFieldGuardTests","-k","WritingYearTests")
 
 & $PY -m unittest discover @S @FIXTURE -v ; "退出码=$LASTEXITCODE"
 & $PY _知识库系统/scripts/build_index.py

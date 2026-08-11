@@ -246,16 +246,40 @@ FILENAME_DOTTED = re.compile(r"(?<!\d)(\d{1,2})[.．](\d{1,2})(?!\d)")
 BODY_TIMESTAMP = re.compile(r"(?<!\d)(\d{2})-(\d{2})\s+\d{1,2}[：:]\d{2}")
 BODY_FULL_DATE = re.compile(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})")
 BODY_YEAR = re.compile(r"(20\d{2})\s*年")
-# 举例/回顾语境里的年份**不能当成文时间**。
+# 光秃秃的「20XX年」不能当成文时间 —— 它可能是历史举例。
 # 实测 `主升龙头空空1090 情绪周期 四万字` 全篇只有两个年份，都是举例：
 #   「比如 2022 年浙江建投作为基建总真龙…」
 #   「比如 2023 年消费退潮期的全聚德…」
 # 取最大值会把这篇 26701 字的方法论标成 2023 年（真实成文时间不明，同批在 2026），
-# 「按时间看作者观点演变」的查询会因此错排三年。宁可返回 unknown。
-EXAMPLE_YEAR_CONTEXT = re.compile(
-    r"(?:比如|例如|譬如|好比|回顾|当年|历史上|早在|记得|曾经|参考)"
-    r"[^。！？\n]{0,12}?(20\d{2})\s*年"
-)
+# 「按时间看作者观点演变」的查询会因此错排三年。
+#
+# ⚠️ **不要用「引导词黑名单」判举例。** 第一版写的是
+#   `(?:比如|例如|譬如|好比|回顾|当年|历史上|早在|记得|曾经|参考)[^。！？\n]{0,12}?(20\d{2})年`
+# 实测双向都不准：30 个举例句式漏 19 个（`像2021年那波`、`拿2019年来说`、
+# `以2017年为例`、`2015年那波杠杆牛`、`复盘2021年的白酒` 都不含表里的词），
+# 而 10 个作者自指句误排 6 个（`例如2025年初我就说过` 同时含引导词和自指）。
+# 讽刺的是那版代码注释里举的「该保留」的例句 `早在2026年初就锚定了国产替代`
+# 自己就在黑名单里。引导词是无穷集合，黑名单注定漏；自指句也会用引导词，注定误伤。
+#
+# 换判据：**不猜「是不是举例」，只判「这个年份配不配当成文时间」。**
+# 成文时间只可能是当年或前一年（写作不会晚于发表太多），更早的年份出现在正文里
+# 一定是在讲历史。这个判据不依赖任何词表：
+#   ① 年份 >= 参照年 - 1        → 可能是成文时间
+#   ② 年份 <  参照年 - 1        → 一定是历史举例，无论用什么句式引出
+# 参照年优先用文件名/正文的完整日期，都没有才退到 batch_year。
+RECENT_YEAR_SLACK = 1
+
+
+def plausible_writing_years(body: str, reference_year: int | None) -> list[int]:
+    """正文里哪些年份可能是成文时间。没有参照年时返回空列表（宁缺勿错）。
+
+    返回的是候选，调用方仍需决定取哪个。空列表意味着「正文的年份都不足以定成文时间」，
+    这比给一个错年份好 —— 错年份会让按时间筛观点演变的查询把文章排到几年前。
+    """
+    if reference_year is None:
+        return []
+    years = {int(value) for value in BODY_YEAR.findall(body)}
+    return sorted(year for year in years if year >= reference_year - RECENT_YEAR_SLACK)
 
 
 def _valid(month: int, day: int) -> bool:
@@ -291,16 +315,16 @@ def resolve_date(filename: str, body: str, batch_year: int | None = None) -> tup
     year_hint = None
     full = BODY_FULL_DATE.search(body)
     if full:
+        # 完整年月日最可信：写全了「2026年6月18日」的，年份不会是随口举的例
         year_hint = int(full.group(1))
     else:
-        # 先剔掉「比如2023年…」这类举例语境里的年份，剩下的才可能是成文时间。
-        example_years = Counter(EXAMPLE_YEAR_CONTEXT.findall(body))
-        all_years = Counter(BODY_YEAR.findall(body))
-        usable = all_years - example_years
-        if usable:
-            # 取最大值：正文确实会回溯往年（「早在2024年初就锚定了国产替代」），
-            # 在排除举例之后，最大的那个更接近成文时间
-            year_hint = max(int(value) for value in usable.elements())
+        # 只有光秃秃的「20XX年」时，按「配不配当成文时间」筛，而不是猜是否举例。
+        # 参照年只能用 batch_year（本文没有完整日期，否则上面那支已经命中）。
+        candidates = plausible_writing_years(body, batch_year)
+        if candidates:
+            # 取最大值：正文会回溯往年（「早在2024年初就锚定了国产替代」），
+            # 在只剩「够近的年份」之后，最大的那个最接近成文时间
+            year_hint = max(candidates)
 
     def with_year(month: int, day: int) -> tuple[str, str] | None:
         """给定月日，按「本文年份 > 批次年份」的优先级补全，并标出精度来源。"""

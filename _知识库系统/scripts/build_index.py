@@ -149,7 +149,9 @@ CHUNK_VALUE_GETTERS = {
     "speakers": lambda item: join_value(item.get("speakers")),
     "topics": lambda item: join_value(item.get("topics")),
     "image_path": lambda item: join_value(item.get("image_path")),
-    "chunk_type": lambda item: item.get("chunk_type", "text"),
+    # chunk_type 不给默认值：原先兜底成 "text"，而那个值不在任何来源的真实取值里，
+    # 缺失时会静默把块归到一个不存在的类型。现在缺失由 add_chunk 显式报错。
+    "chunk_type": lambda item: item.get("chunk_type", ""),
 }
 
 # 进 FTS 的列。topics 故意不进（自动标签会压过正文命中，见 create_schema）；
@@ -158,14 +160,54 @@ CHUNK_VALUE_GETTERS = {
 FTS_COLUMNS = ("title", "author", "text")
 
 
+# 建表声明了 NOT NULL 的列。SQLite 的 NOT NULL 只挡 None，挡不住 ""，
+# 而 `item.get(name, "")` 恰好把「字段缺失」变成了空字符串 —— 于是一个没有正文、
+# 没有定位、没有标题的块能一路静默入库，检索时是个查得到却读不懂的空壳。
+# 这里在插入前自己拦住，让缺失变成导入失败而不是坏数据。
+REQUIRED_CHUNK_FIELDS = tuple(
+    name for name, definition in CHUNK_COLUMNS if "NOT NULL" in definition or "PRIMARY KEY" in definition
+)
+
+# chunk_type 的合法取值。原先 `item.get("chunk_type", "text")` 用 "text" 兜底，
+# 而 "text" 不在任何来源的真实取值里（实测 21 个取值，无 text）—— 那个默认值一旦
+# 生效就是静默的错数据：块被归到一个不存在的类型，按 chunk_type 过滤时永远漏掉它。
+# 新增类型要往这里加一行，让「加了新类型但忘了登记」变成显式失败。
+KNOWN_CHUNK_TYPES = frozenset({
+    # 各来源正文
+    "article", "article_body", "paid_article", "daily_review", "daily_data",
+    "weekend_essay", "transcript", "feishu_chat", "course_text", "method_article",
+    "market_commentary", "indicator_formula",
+    # 留言区与问答
+    "author_reply", "qa_reply",
+    # OCR 类（数字不可信，引用前回看原页）
+    "image_ocr", "chart_ocr", "screenshot_ocr", "course_ocr",
+    # 第三方汇编与人工整理
+    "curated_digest", "curated_method", "conflict",
+})
+
+
 def add_chunk(connection: sqlite3.Connection, item: dict) -> None:
+    # chunk_type 先校验：它同时属于「必需字段」和「枚举字段」，空串两边都能拦住。
+    # 让枚举检查先跑，报错才有指导性 —— 「不在 KNOWN_CHUNK_TYPES 里，去加一行」
+    # 比「缺少必需字段 ['chunk_type']」更能告诉人下一步做什么。
+    chunk_type = item.get("chunk_type")
+    if chunk_type not in KNOWN_CHUNK_TYPES:
+        raise ValueError(
+            f"块 {item['chunk_id']!r} 的 chunk_type={chunk_type!r} 不在 KNOWN_CHUNK_TYPES 里。"
+            f"新增类型请往 build_index.py 的 KNOWN_CHUNK_TYPES 加一行 —— "
+            f"不登记的话按 chunk_type 过滤会永远漏掉这批块"
+        )
+    missing = [name for name in REQUIRED_CHUNK_FIELDS if not str(item.get(name) or "").strip()]
+    if missing:
+        raise ValueError(
+            f"块 {item.get('chunk_id', '(无 chunk_id)')!r} 缺少必需字段 {missing}："
+            f"这些列声明了 NOT NULL，但 SQLite 只挡 None 不挡空串，"
+            f"写进去会得到一个查得到却读不懂的空壳块"
+        )
     values = {
         name: CHUNK_VALUE_GETTERS.get(name, lambda item, name=name: item.get(name, ""))(item)
         for name, _ in CHUNK_COLUMNS
     }
-    # chunk_id 与 source_id 是必需的，缺了要炸而不是写空字符串
-    values["chunk_id"] = item["chunk_id"]
-    values["source_id"] = item["source_id"]
     placeholders = ",".join("?" for _ in CHUNK_COLUMNS)
     connection.execute(
         f"INSERT INTO chunks VALUES ({placeholders})",

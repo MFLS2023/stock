@@ -15,7 +15,7 @@ index and reports on data the run is about to replace:
     FIXTURE="-k FixtureShapeTests -k IndexPollutionTests -k ShortTermSearchTests \
              -k SourceCoverageTests -k RetrievalContractTests -k GlobEscapingTests \
              -k AsciiCaseRecallTests -k SubsetMarkerTests -k SourceRegistryTests"
-    REAL="-k RealIndexRequirementTests -k RealIndexTests -k RegistryScopedIndexTests"
+    REAL="-k RealIndexRequirementTests -k RealIndexTests -k RegistryScopedIndexTests -k ChunkFieldGuardTests -k WritingYearTests"
 
     python -m unittest discover $S $FIXTURE -v                      # 步骤 1，重建索引前
     KB_REQUIRE_REAL_INDEX=1 python -m unittest discover $S $REAL -v  # 步骤 3，重建之后
@@ -86,7 +86,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 import yaml
 
 import query_kb  # 同义词扩展的测试要改模块级常量，需要模块对象本身
-from build_index import ALLOWED_STATUSES, add_chunk, create_schema
+from build_index import ALLOWED_STATUSES, KNOWN_CHUNK_TYPES, add_chunk, create_schema
+# import_kongkonglong 只在纯 docx/txt 上工作，顶层不 import pypdf，
+# 所以这里可以直接导入（对比 import_boduanzhimen 会因 pypdf 缺失而 ImportError）。
+from import_kongkonglong import plausible_writing_years
 from query_kb import (
     ASCII_FOLD,
     FIELD_WEIGHTS,
@@ -3645,6 +3648,12 @@ REAL_INDEX_TEST_CLASSES = (
     "RealIndexRequirementTests",
     "RealIndexTests",
     "RegistryScopedIndexTests",
+    # 这两个类多数用例跑内存库/纯函数，但各有一条读重建后的产物：
+    # ChunkFieldGuardTests 断言真库里的 chunk_type 都已登记，
+    # WritingYearTests 断言 kongkonglong 的 documents.jsonl 不再把自己标成 2023。
+    # 归 REAL_INDEX 组是因为那两条必须在重建之后才有意义。
+    "ChunkFieldGuardTests",
+    "WritingYearTests",
 )
 
 
@@ -3808,6 +3817,168 @@ class SubsetMarkerTests(unittest.TestCase):
                 self.assertEqual(
                     offenders, [], f"{name} 读了真库路径，会在重建前测到旧索引"
                 )
+
+
+class ChunkFieldGuardTests(unittest.TestCase):
+    """守 add_chunk 对必需字段和 chunk_type 的拦截。
+
+    2026-08-09 加的。起因：建表声明了 5 个 NOT NULL 列，但 SQLite 的 NOT NULL 只挡
+    None、挡不住空字符串，而 add_chunk 用 `item.get(name, "")` 取值 —— 于是「字段缺失」
+    静默变成空串，一个没有正文、没有定位的块能一路入库，检索时是个查得到却读不懂的空壳。
+    chunk_type 更隐蔽：原先缺失时兜底成 "text"，而那个值不在任何来源的 21 个真实取值里，
+    按 chunk_type 过滤时会永远漏掉这批块。
+
+    这两条都是「当前数据没问题、但下次写导入器就会踩」的加固，所以必须有测试锁住，
+    否则加固很容易在后续重构里被顺手删掉。
+    """
+
+    def _connection(self):
+        connection = sqlite3.connect(":memory:")
+        create_schema(connection)
+        self.addCleanup(connection.close)
+        return connection
+
+    def test_a_well_formed_chunk_still_goes_in(self):
+        connection = self._connection()
+        add_chunk(connection, chunk("fulibei", 1, "正文内容"))
+        self.assertEqual(
+            connection.execute("SELECT count(*) FROM chunks").fetchone()[0], 1
+        )
+
+    def test_missing_required_fields_raise_instead_of_writing_blanks(self):
+        # locator 不在这里测：chunk() 的 locator 由 index 拼成，传空要改 fixture 签名。
+        # text/title/chunk_type 三条已经覆盖了「空串绕过 NOT NULL」这个机制本身。
+        for field in ("text", "title"):
+            with self.subTest(field=field):
+                connection = self._connection()
+                item = chunk("fulibei", 1, "正文内容")
+                item[field] = ""
+                with self.assertRaises(ValueError) as caught:
+                    add_chunk(connection, item)
+                self.assertIn(field, str(caught.exception))
+                self.assertEqual(
+                    connection.execute("SELECT count(*) FROM chunks").fetchone()[0],
+                    0,
+                    "拦住了就不该有半条记录落库",
+                )
+
+    def test_whitespace_only_text_counts_as_missing(self):
+        # 纯空白与空串等价：两者都让块不可读，而 strip() 之后才能看出来
+        connection = self._connection()
+        item = chunk("fulibei", 1, "正文内容")
+        item["text"] = "   \n  "
+        with self.assertRaises(ValueError):
+            add_chunk(connection, item)
+
+    def test_unregistered_chunk_type_is_rejected(self):
+        # "text" 是原先的兜底默认值，它必须被拒 —— 那正是这条加固要防的静默错数据
+        for bad_type in ("text", "my_new_type", ""):
+            with self.subTest(chunk_type=bad_type):
+                connection = self._connection()
+                item = chunk("fulibei", 1, "正文内容", chunk_type=bad_type)
+                with self.assertRaises(ValueError) as caught:
+                    add_chunk(connection, item)
+                self.assertIn("KNOWN_CHUNK_TYPES", str(caught.exception))
+
+    def test_every_chunk_type_in_the_real_index_is_registered(self):
+        """索引里实际出现的 chunk_type 必须都在白名单里。
+
+        这条是双向的：白名单漏登记会让 build_index 直接失败（上面那条测的），
+        而这条防的是反向 —— 白名单写了却与真实数据脱节。若某来源改了 chunk_type
+        命名而没更新白名单，重建索引时会炸；但若白名单里堆了一堆早已不用的旧名字，
+        它就不再是「合法取值清单」而只是一份历史记录。
+        """
+        if not DATABASE.exists():
+            self.skipTest("真库不存在")
+        connection = sqlite3.connect(f"file:{DATABASE}?mode=ro", uri=True)
+        self.addCleanup(connection.close)
+        actual = {
+            row[0] for row in connection.execute("SELECT DISTINCT chunk_type FROM chunks")
+        }
+        unregistered = actual - KNOWN_CHUNK_TYPES
+        self.assertEqual(
+            unregistered, set(), f"索引里有未登记的 chunk_type：{sorted(unregistered)}"
+        )
+
+
+class WritingYearTests(unittest.TestCase):
+    """守 import_kongkonglong.plausible_writing_years 的「年份配不配当成文时间」判据。
+
+    2026-08-09 换掉的实现：原先用「引导词黑名单」判是否举例
+    （比如|例如|回顾|早在|…），实测双向都不准 —— 30 个举例句式漏 19 个
+    （`像2021年那波`、`拿2019年来说`、`以2017年为例` 都不含表里的词），
+    10 个作者自指句误排 6 个（`例如2025年初我就说过` 同时含引导词和自指）。
+    引导词是无穷集合，黑名单注定漏；自指句也会用引导词，注定误伤。
+
+    新判据不看句式，只看年份离参照年多远：成文时间只可能是当年或前一年，
+    更早的一定是在讲历史。这些用例锁住的正是「不依赖词表」这个性质，
+    所以故意用不含任何引导词的句子。
+    """
+
+    REFERENCE = 2026
+
+    def test_old_years_are_excluded_whatever_the_phrasing(self):
+        for sentence in (
+            "像2021年那波锂电",           # 不含旧黑名单里的任何词
+            "拿2019年来说",
+            "以2017年为例",
+            "2015年那波杠杆牛就是典型",     # 年份开头，前面没有引导词
+            "复盘2021年的白酒",
+            "对比2015年，现在的量化",
+            "2007年的时候大家都疯了",
+            "比如2023年消费退潮期的全聚德",   # 旧黑名单能覆盖的，新判据也要覆盖
+            "2022年浙江建投走出6+4+4",
+        ):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(
+                    plausible_writing_years(sentence, self.REFERENCE),
+                    [],
+                    "早于参照年 1 年以上的年份不可能是成文时间",
+                )
+
+    def test_recent_years_survive_even_with_example_markers(self):
+        # 这几句旧实现会误排——它们含引导词，但说的是作者自己近期做过的事
+        for sentence, expected in (
+            ("例如2025年初我就说过这个逻辑", [2025]),
+            ("比如我在2026年一直强调的防爆头", [2026]),
+            ("早在2026年初我就锚定了国产替代", [2026]),
+            ("记得2026年3月我提醒过大家", [2026]),
+            ("2025年的行情大家都记得", [2025]),
+        ):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(plausible_writing_years(sentence, self.REFERENCE), expected)
+
+    def test_mixed_sentence_keeps_only_the_recent_year(self):
+        self.assertEqual(
+            plausible_writing_years("比如2021年那波我没参与，但2026年这波我全程在", self.REFERENCE),
+            [2026],
+        )
+
+    def test_no_reference_year_yields_nothing(self):
+        """没有参照年时返回空，而不是猜一个。
+
+        宁缺勿错：错年份会让「按时间看观点演变」的查询把文章排到几年前，
+        比留空更难发现。实测 `主升龙头空空1090` 全篇只有 2022/2023 两个举例年份，
+        旧实现取最大值把这篇 26701 字的方法论标成了 2023 年。
+        """
+        self.assertEqual(plausible_writing_years("比如2023年的全聚德", None), [])
+
+    def test_the_real_source_no_longer_dates_itself_to_an_example_year(self):
+        """回归：那篇只含举例年份的文档不能再被标成 2023。"""
+        library = DATABASE.parents[1] / "source_libraries" / "kongkonglong"
+        documents = library / "documents.jsonl"
+        if not documents.exists():
+            self.skipTest("kongkonglong 未导入")
+        rows = [
+            json.loads(line)
+            for line in documents.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        target = [row for row in rows if "1090" in row["original_path"]]
+        self.assertTrue(target, "找不到 主升龙头空空1090 那篇")
+        self.assertNotEqual(
+            target[0]["date"], "2023", "又被正文里「比如2023年全聚德」这个举例带跑了"
+        )
 
 
 class SourceRegistryTests(unittest.TestCase):

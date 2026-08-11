@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-11T13:28:55.460080+00:00",
+  "generated_at": "2026-08-11T14:20:49.904512+00:00",
   "source_id": "kongkonglong",
   "upstream_path": "C:\\Users\\20577\\Documents\\炒股\\主升龙头空空龙",
   "candidates": 14,
@@ -13,8 +13,7 @@
     "skipped_superseded": 2,
     "skipped_duplicate_fingerprint": 2,
     "chunk_method_article": 167,
-    "chunk_market_commentary": 5,
-    "stale_texts_removed": 2
+    "chunk_market_commentary": 5
   },
   "noise_removed": {
     "platform": 13,
