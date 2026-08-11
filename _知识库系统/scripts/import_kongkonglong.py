@@ -607,6 +607,9 @@ def main() -> int:
     if args.limit:
         candidates = candidates[: args.limit]
 
+    # 本轮真正写出的 texts 文件名，用于收尾时清理陈旧产物（见 main 末尾）
+    written_texts: set[str] = set()
+
     # 第一遍：抽取正文并算指纹，为判重做准备
     extracted: list[dict] = []
     for read_path, origin in candidates:
@@ -767,6 +770,7 @@ def main() -> int:
             lib / "texts" / f"{doc_id}.txt",
             "\n\n".join(f"[{unit['locator']}]\n{unit['text']}" for unit in units) + "\n",
         )
+        written_texts.add(f"{doc_id}.txt")
 
     # 建 parents / chunks
     for document in documents:
@@ -873,6 +877,20 @@ def main() -> int:
         }
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0 if not errors else 1
+
+    # 清理陈旧的 texts：某篇文档这轮改判成冗余后就不该再有 texts 文件。
+    # 不清理会留下「无块的 texts」—— 实测修好循环去重后，`创业板科创板短差` 和
+    # `创业科创20cm套利` 两篇从建块改成不建块，它们上一轮的 texts 却留在磁盘上，
+    # 还被当成新文件提交进了 git。doc_id 由文件名 hash 算出（稳定），所以陈旧文件
+    # 不会被新内容覆盖，只会越积越多。
+    stale = [
+        path
+        for path in (lib / "texts").glob("*.txt")
+        if path.name not in written_texts
+    ]
+    for path in stale:
+        path.unlink()
+        stats["stale_texts_removed"] += 1
 
     write_jsonl(lib / "documents.jsonl", documents)
     write_jsonl(lib / "parents.jsonl", parents)
