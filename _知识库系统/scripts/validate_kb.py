@@ -137,6 +137,38 @@ def main() -> int:
         total_cards = sum(sum(d.values()) for d in method_status_summary.values())
         check(True, "方法卡审批进度", f"reviewed={reviewed_total}/{total_cards}  {detail}", results)
 
+    # last_import_summary.chunks 与实际块数一致性。
+    #
+    # 为什么需要这条：导入器原先用 yaml.safe_dump 整文件回写 sources.yaml 来更新这个
+    # 数字，但那会抹掉登记表的 24 行注释、并在并发导入时静默覆盖对方的改动，
+    # 所以 2026-08-09 起 import_kongkonglong.py 不再自动回写。代价是这个字段变成
+    # 「靠人记得手改」—— 而现存数据证明人记不住：加这条检查时实测 nanjinglu_bian
+    # 登记 551、实际 586，差 35 块且无人发现。
+    #
+    # 只对**写了这个字段**的来源断言。没写的不算错：那表示该来源没登记过导入摘要，
+    # 与「登记了但对不上」是两种情况，后者才说明有人改了数据忘了改登记表。
+    drift: list[str] = []
+    for source in config.get("sources", []):
+        if source.get("status", "") not in ALLOWED_STATUSES:
+            continue
+        declared = (source.get("last_import_summary") or {}).get("chunks")
+        if declared is None:
+            continue
+        path = SYSTEM / "source_libraries" / source["id"] / "chunks.jsonl"
+        actual = (
+            sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+            if path.exists()
+            else 0
+        )
+        if declared != actual:
+            drift.append(f"{source['id']}: 登记 {declared} 实际 {actual}（差 {actual - declared}）")
+    check(
+        not drift,
+        "登记表块数一致性",
+        "; ".join(drift) if drift else "OK（只检查写了 last_import_summary.chunks 的来源）",
+        results,
+    )
+
     skill_root = ROOT / ".agents" / "skills"
     skill_names = [
         "trading-source-curator", "trading-knowledge-tutor", "cross-source-synthesizer",

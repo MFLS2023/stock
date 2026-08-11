@@ -13,6 +13,6 @@
 | 2026-05-23 | day_batch | 防爆头2.0 | method_article | 14384 | 0 | superseded |
 | 2026-05-23 | day_batch | 防爆头2.0 | method_article | 14384 | 0 | duplicate_fingerprint |
 | 2026-06-14 | day_inferred | 空空龙防爆头新日期拆解文字6.14-19 | method_article | 21712 | 0 | 已建块 |
-| 2026-06-14 | day_batch | 竞价抢筹盘口的量化公式与十几年的体系干货，全篇 | method_article | 3326 | 0 | 已建块 |
+| 2026-06-14 | day_batch | 竞价抢筹盘口的量化公式与十几年的体系干货，全篇 | method_article | 3323 | 0 | 已建块 |
 | 2026-06-20 | day_batch | 6月20日中午空空龙汇阳财策 | method_article | 2110 | 0 | 已建块 |
 | 2026-06-21 | day_inferred | 6月21汇阳财策—空空龙 | market_commentary | 2868 | 9 | 已建块 |
