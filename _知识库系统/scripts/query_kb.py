@@ -19,6 +19,12 @@ DATABASE = ROOT / "_知识库系统" / "indexes" / "knowledge.db"
 # 补一条召回路径（SPEC 2.3）。
 MATCH_MIN_LENGTH = 3
 
+# 人读模式每块正文的预览字符数。原值 420 会把方法卡截成半句——demo1 实测
+# 「知道适」「怎么判断大小题」两处断句直接砍掉了实操指引和问题后半段，
+# 至少一道"半答"由此而来。1200 覆盖绝大多数块的完整正文（全库块长中位 669、
+# 最长 1601），要全文用 --show-parent 或 --json。
+PREVIEW_CHARS = 1200
+
 # 召回字段：人写的三列。topics 由 infer_topics() 按关键词计数自动打，标签文本本身
 # 从不出现在正文里，阶段 1 已把它移出 FTS 可匹配列，召回同样不带它（SPEC 2.2）。
 # 顺序无所谓——三列在同一次扫描里 OR 起来。
@@ -652,7 +658,7 @@ def ranking_key(row: sqlite3.Row, terms: list[str]) -> tuple:
 
 
 def rank_and_truncate(rows: list[sqlite3.Row], terms: list[str], limit: int) -> list[sqlite3.Row]:
-    """先按 ranking_key() 排全量候选，再截断到 limit。
+    """先按 ranking_key() 排全量候选，再做同形词降噪，最后截断到 limit。
 
     两条召回路径都走这一个函数，这是"两条路径同一把尺子"的落点。顺序不能颠倒：
     先截断再排序等于按召回顺序挑前几条，那正是缺陷 C 的形态（按 rowid 截断，
@@ -660,8 +666,64 @@ def rank_and_truncate(rows: list[sqlite3.Row], terms: list[str], limit: int) -> 
 
     ``limit`` 只影响返回条数，不影响任何一条的位次——所以 ``--limit 8`` 的结果
     必然是 ``--limit 40`` 结果的前 8 条（SPEC 阶段 3「前缀稳定」验收项）。
+    截断之前多一步 _demote_homograph_noise()：它只在弱词在场时才动顺序，
+    单纯的中文查询排序结果与五层契约完全一致。
     """
-    return sorted(rows, key=lambda row: ranking_key(row, terms))[:limit]
+    ranked = sorted(rows, key=lambda row: ranking_key(row, terms))
+    return _demote_homograph_noise(ranked, terms)[:limit]
+
+
+# 同形词降噪（2026-08-24）。短拉丁/数字词是子串匹配的重灾区：查「买卖计划 plan abc」，
+# 「ABC 板块博弈」「abc 调整浪形」只因为含字面 abc 就入选并占满输出位
+# （demo1 第 9 题 Top4 里 3 条是这类噪声；kb-ask SKILL 里「容量→脑容量」同类坑）。
+WEAK_TERM_PATTERN = re.compile(r"[A-Za-z0-9]{1,4}\Z")
+
+
+def _matched_terms(folds: FieldFolds, prepared: tuple[FoldedTerm, ...]) -> set[str]:
+    """这一行的三字段里出现了哪些检索词（折叠形式），与 matched_term_count 同口径。"""
+    matched: set[str] = set()
+    for term in prepared:
+        for column in RECALL_COLUMNS:
+            raw = folds.raw(column)
+            if term.folded in term.haystack(raw, folds, column):
+                matched.add(term.folded)
+                break
+    return matched
+
+
+def _demote_homograph_noise(
+    ranked: list[sqlite3.Row], terms: list[str]
+) -> list[sqlite3.Row]:
+    """把「只命中弱词」的块排到所有至少命中一个非弱词的块之后。
+
+    启用条件缺一不可：
+      * 查询至少两个词 —— 单词查询没有"其他词"可参照；
+      * 弱词存在但不满员 —— 查询本身就是 ``abc`` 时它们是全部结果，不能全灭；
+      * 强候选真实存在 —— 否则弱词块就是最好的答案，保持原序。
+
+    满足时才重排：强块整体在前、弱词独命中的块整体在后，各自内部相对顺序不变
+    （稳定分区）。不满足时返回原列表，行为与五层契约逐位一致。
+    """
+    prepared = folded_terms(tuple(terms))
+    weak_folded = {
+        term.folded
+        for term, raw_term in zip(prepared, terms)
+        if WEAK_TERM_PATTERN.fullmatch(raw_term)
+    }
+    all_folded = {term.folded for term in prepared}
+    if len(all_folded) < 2 or not weak_folded or weak_folded == all_folded:
+        return ranked
+    strong: list[sqlite3.Row] = []
+    suspects: list[sqlite3.Row] = []
+    for row in ranked:
+        matched = _matched_terms(FieldFolds(row), prepared)
+        if matched and matched <= weak_folded:
+            suspects.append(row)
+        else:
+            strong.append(row)
+    if not strong or not suspects:
+        return ranked
+    return strong + suspects
 
 
 def search(connection: sqlite3.Connection, query: str, source: str | None, author: str | None, limit: int):
@@ -862,10 +924,14 @@ def main() -> int:
     parser.add_argument("--source")
     parser.add_argument("--author")
     parser.add_argument("--limit", type=int, default=8)
+    parser.add_argument("--preview", type=int, default=PREVIEW_CHARS,
+                        help=f"人读模式每块正文预览的字符数（默认 {PREVIEW_CHARS}）")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--show-parent", action="store_true")
-    parser.add_argument("--expand", action="store_true",
-                        help="用 config/synonyms.yaml 扩展同义词后再检索")
+    parser.add_argument("--expand", action=argparse.BooleanOptionalAction, default=True,
+                        help="用 config/synonyms.yaml 扩展同义词后再检索（默认开，--no-expand 关）。"
+                             "注意：查波段之门（--source boduanzhimen）建议 --no-expand，"
+                             "同义词表是短线情绪体系建的，对他家会引入噪声")
     args = parser.parse_args()
 
     if not DATABASE.exists():
@@ -885,13 +951,48 @@ def main() -> int:
     # 中文长句在 terms_from_query 里切不开（re.split 只认空格和标点），
     # 「怎么判断情绪周期拐点」会被当成一个 10 字词做精确匹配，返回 0 条，
     # 而拆成「情绪周期」「拐点」各有 8 条 —— 不兜这一下，用户会误判「库里没有」。
-    if not rows:
+    #
+    # 2026-08-24 扩展出两个新触发条件（demo1 重跑实测缺一不可）：
+    #   ① 「有结果但全部只是标题/作者带词、正文零命中」—— 比零结果更常见；
+    #   ② 「有结果但全部只命中短拉丁/数字弱词」—— 问句里的中文粘成长伪词后
+    #      匹配零块，能命中的只剩 plan/abc 这类字母串，召回的全是同形词噪声
+    #      （demo1 第 9 题：整句进去，Top4 三条是 ABC 板块/abc 浪形）。
+    query_terms = terms_from_query(query)
+    prepared_query = folded_terms(tuple(query_terms))
+    has_prose = any(prose_hit(FieldFolds(row), prepared_query) for row in rows) if rows else False
+    weak_query = {
+        term.folded
+        for term, raw_term in zip(prepared_query, query_terms)
+        if WEAK_TERM_PATTERN.fullmatch(raw_term)
+    }
+    strong_rows = [
+        row for row in rows
+        if _matched_terms(FieldFolds(row), prepared_query) - weak_query
+    ] if rows else []
+    # 第四个条件：强候选仅 1 条而输出位已被弱命中塞满（len(rows) 达到 limit）——
+    # 说明中文词几乎没贡献，输出被字母串同形词占据，试一次更干净的切词。
+    # 纯多词中文查询不会误触：它们的 split_sentence 结果与原词表相同，被下面的
+    # ``pieces != query_terms`` 挡住。
+    saturated_by_weak = len(strong_rows) <= 1 and len(rows) >= args.limit
+    if not rows or not has_prose or not strong_rows or saturated_by_weak:
         pieces = split_sentence(query)
-        if pieces and pieces != terms_from_query(query):
+        if pieces and pieces != query_terms:
             retry = " ".join(pieces)
-            rows = search(connection, retry, args.source, args.author, args.limit)
-            if rows and not args.json:
-                print(f"整句无结果，已按术语切词重试：{' / '.join(pieces)}\n")
+            retried = search(connection, retry, args.source, args.author, args.limit)
+            if retried:
+                # 提示语按触发前的状态选：各触发条件对应不同的用户可感知病因
+                had_rows, had_prose, had_strong = bool(rows), has_prose, bool(strong_rows)
+                rows = retried
+                if not args.json:
+                    if not had_rows:
+                        reason = "整句无结果"
+                    elif not had_prose:
+                        reason = "结果全无正文命中"
+                    elif not had_strong:
+                        reason = "结果只命中字母串，中文词零命中"
+                    else:
+                        reason = "有效命中不足，输出被弱相关块占满"
+                    print(f"{reason}，已按术语切词重试：{' / '.join(pieces)}\n")
     results = []
     for row in rows:
         item = dict(row)
@@ -910,7 +1011,7 @@ def main() -> int:
         print("未找到匹配结果。")
         return 1
     for index, item in enumerate(results, start=1):
-        preview = item["text"].replace("\n", " ")[:420]
+        preview = item["text"].replace("\n", " ")[: max(args.preview, 0)]
         citation = f"[{item.get('source_name') or item['source_id']}｜{item.get('author') or '未标注'}｜{item['title']}｜{item.get('date') or '日期未标注'}｜{item['locator']}]"
         print(f"\n#{index} {citation}")
         print(f"类型: {item['chunk_type']} | 主题: {item.get('topics') or '未标注'} | ID: {item['chunk_id']}")
