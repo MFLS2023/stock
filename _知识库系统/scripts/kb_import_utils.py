@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import io
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unicodedata
 from collections.abc import Callable, Iterable, Sequence
@@ -494,8 +496,10 @@ def _prepare_tiles(
     for item_index, (key, image_path) in enumerate(batch, start=1):
         # 文件名必须含 key 的派生量：调用方可能逐条调本函数（item_index 恒为 1），
         # 同一个 work 目录里只靠序号会互相覆盖 —— 2026-08-24 课程讲义全变成同一页
-        # 就是这么来的。key 里可能有路径分隔符等非法字符，清洗后截断。
-        safe_key = re.sub(r"[^\w.-]", "_", str(key))[:40] or "img"
+        # 就是这么来的。key 清洗后截断到 48 字符，再拼整个 key 的短哈希兜底——
+        # 截断可能撞（长路径同前缀），哈希不会。
+        safe_key = re.sub(r"[^\w.-]", "_", str(key))[:48] or "img"
+        key_tag = hashlib.sha1(str(key).encode("utf-8")).hexdigest()[:8]
         tile_outputs: list[Path] = []
         with Image.open(image_path) as opened:
             image = ImageOps.exif_transpose(opened).convert("RGB")
@@ -505,7 +509,7 @@ def _prepare_tiles(
             for tile_index, box in enumerate(
                 _tile_boxes(image.width, image.height, max_dimension, overlap), start=1
             ):
-                tile_path = work / f"{item_index:03d}-{safe_key}-tile-{tile_index:03d}.png"
+                tile_path = work / f"{item_index:03d}-{safe_key}-{key_tag}-tile-{tile_index:03d}.png"
                 image.crop(box).save(tile_path, format="PNG")
                 tile_outputs.append(tile_path)
         tile_map[key] = tile_outputs
@@ -554,11 +558,17 @@ def _run_rapid_tiles(tile_map: dict[str, list[Path]], *, language: str) -> None:
     engine = _rapid_engine()
     for tile_outputs in tile_map.values():
         for tile_path in tile_outputs:
-            with Image.open(tile_path) as tile_image:
-                array = np.asarray(tile_image.convert("RGB"))
-            result, _ = engine(array)
-            lines = [line[1] for line in (result or [])]
-            write_text_lf(tile_path.with_suffix(".txt"), "\n".join(lines))
+            try:
+                with Image.open(tile_path) as tile_image:
+                    array = np.asarray(tile_image.convert("RGB"))
+                result, _ = engine(array)
+                lines = [line[1] for line in (result or [])]
+                write_text_lf(tile_path.with_suffix(".txt"), "\n".join(lines))
+            except Exception as exc:
+                # 单分片失败不致命：留空 txt 让合并继续，错误打到 stderr 留痕。
+                # （2026-08-24 审计 B 项：此前单片异常会炸掉整批导入）
+                print(f"rapid 分片识别失败 {tile_path.name}: {exc}", file=sys.stderr)
+                write_text_lf(tile_path.with_suffix(".txt"), "")
 
 
 @lru_cache(maxsize=1)
@@ -641,44 +651,66 @@ def ocr_images(
                     results[key] = {"text": "", "error": f"prepare_failed: {exc}", "tiles": 0}
             tile_map = {k: v for k, v in prepared.items() if v is not None}
 
-            def read_key(key: str) -> str:
-                return _merge_tile_texts([
-                    p.with_suffix(".txt").read_text(encoding="utf-8")
-                    for p in tile_map[key] if p.with_suffix(".txt").exists()
-                ])
-
-            missing_by_key = {
-                k: sum(1 for p in v if not p.with_suffix(".txt").exists())
-                for k, v in tile_map.items()
-            }
+            def read_key(key: str) -> tuple[str, int]:
+                """读回该图全部分片文本并合并；返回 (合并文本, 缺失分片数)。"""
+                texts, missing = [], 0
+                for p in tile_map[key]:
+                    txt_path = p.with_suffix(".txt")
+                    if txt_path.exists():
+                        texts.append(txt_path.read_text(encoding="utf-8"))
+                    else:
+                        missing += 1
+                return _merge_tile_texts(texts), missing
 
             if chosen_engine == "windows":
                 _run_windows_tiles(tile_map, work, language=language)
                 for key in tile_map:
-                    results[key] = {"text": read_key(key), "error": "", "tiles": len(tile_map[key])}
+                    text, missing = read_key(key)
+                    results[key] = {
+                        "text": text,
+                        "error": f"missing_tile_outputs: {missing}" if missing else "",
+                        "tiles": len(tile_map[key]),
+                    }
                 continue
 
             _run_rapid_tiles(tile_map, language=language)
-            rapid_texts = {key: read_key(key) for key in tile_map}
+            rapid_merged = {key: read_key(key) for key in tile_map}
 
             if chosen_engine == "rapid":
+                # 兜底：rapid 失灵（没字/拉丁汤）的图用 Windows 重跑——整批攒齐后
+                # 一次 powershell 调用，不是每图一次（2026-08-24 审计 C 项）。
+                retry_keys = {
+                    key for key, (text, missing) in rapid_merged.items()
+                    if not missing and _rapid_degenerate(text)
+                }
+                if retry_keys:
+                    _run_windows_tiles(
+                        {k: tile_map[k] for k in retry_keys}, work, language=language
+                    )
                 for key in tile_map:
-                    merged = rapid_texts[key]
-                    # 兜底：这张图明显失灵（没字/拉丁汤）时用 Windows 重试，谁认出的汉字多留谁
-                    if not missing_by_key[key] and _rapid_degenerate(merged):
-                        _run_windows_tiles({key: tile_map[key]}, work, language=language)
-                        alt = read_key(key)
+                    merged, missing = rapid_merged[key]
+                    if key in retry_keys:
+                        alt, _ = read_key(key)
                         if cjk_count(alt) > cjk_count(merged):
                             merged = alt
-                    results[key] = {"text": merged, "error": "", "tiles": len(tile_map[key])}
+                    results[key] = {
+                        "text": merged,
+                        "error": f"missing_tile_outputs: {missing}" if missing else "",
+                        "tiles": len(tile_map[key]),
+                    }
                 continue
 
             # dual：Windows 再跑一遍全部图，逐图取汉字多者
             _run_windows_tiles(tile_map, work, language=language)
             for key in tile_map:
-                win_text = read_key(key)
-                merged = win_text if cjk_count(win_text) > cjk_count(rapid_texts[key]) else rapid_texts[key]
-                results[key] = {"text": merged, "error": "", "tiles": len(tile_map[key])}
+                win_text, missing = read_key(key)
+                rap_text, _ = rapid_merged[key]
+                merged = win_text if cjk_count(win_text) > cjk_count(rap_text) else rap_text
+                results[key] = {
+                    "text": merged,
+                    "error": f"missing_tile_outputs: {missing}" if missing else "",
+                    "tiles": len(tile_map[key]),
+                }
         finally:
             shutil.rmtree(work, ignore_errors=True)
     return results

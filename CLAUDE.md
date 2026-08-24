@@ -70,6 +70,10 @@ requests/PIL/docx/pypdf/rapidocr 全有，全套 225 项测试在它上面跑）
 不必切到 codex 运行时。两个解释器都缺 `olefile`，旧版 `.doc` 只能走 Word COM
 （`scripts/convert_doc_to_docx.ps1`，实测可用）。
 
+⚠️ **Windows 子进程读 UTF-8 输出必须显式传 encoding**：子进程默认按 GBK 解码
+`--json` 的 UTF-8 流会直接解析失败（2026-08-24 审计实测踩到）。所有 `subprocess.run`
+读 Python 输出的地方都要带 `encoding="utf-8"`。
+
 ⚠️ **写新导入器不要在顶层 `import pypdf`。** `import_boduanzhimen.py:40` 就这么写的，
 结果它在 Python312 上直接 `ModuleNotFoundError`，连里面不涉及 PDF 的函数都没法复用。
 没有 PDF 的来源根本不需要它；有 PDF 的按 `register_source.py:72` 的做法在函数内 import。
@@ -1196,6 +1200,7 @@ proxy 环境变量并设 `NO_PROXY="*"` —— `trust_env=False` 管不到库内
 | ~~P1~~ | ~~爱在冰川 2023 三季度时间空洞~~ | 已补齐 2026-08-04 | 用户补下载 `.md`，增量导入 71 篇（+131 块）。补完后该季度 65 个工作日只剩 7 天无内容，属作者未发文，见上方小节 |
 | ~~P1~~ | ~~爱在冰川 127 篇整篇未入库~~ | **用户 2026-08-04 决定不救** | `MIN_DOC_CHARS` 保持 100。这 127 篇内容永久不在库内，其中 30 篇作者实写 ≥60 字，需要时回看原文。清单留档在 `06_待你确认_127篇清单.md` |
 | P2 | 干货点摘录与库内原文 3-8 成重复 | 同一观点可能检索到两次（一次原文、一次摘录），计数会虚高 | 已用 `author` 字段区分；如需去重再做 n-gram 比对 |
+| P2 | 南京路 jpg/pdf 双源并存（2026-08-24 价值审计发现）：同一文章的 jpg 版（全 OCR）和 pdf 版（文本层+OCR）都入库，OCR 块可能排在干净文本层块前面 | 新手会把「汶个核心票」这类错字当原文引用 | 候选：排序层给 `extraction_method=embedded` 加小幅优先，或导入层合并双源。下一轮处理 |
 | P2 | 方法卡数量少（约 20 张） | 蒸馏成果不足 | 批量运行蒸馏管道，生成草稿队列 |
 
 ---

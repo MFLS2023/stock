@@ -947,6 +947,10 @@ def main() -> int:
 
     connection = sqlite3.connect(DATABASE)
     connection.row_factory = sqlite3.Row
+    if args.source == "boduanzhimen" and args.expand and not args.json:
+        # 审计 E 项：默认扩词对波段之门是噪声源（同义词表是短线体系建的），
+        # 不做硬覆盖（有人就想跨域找），但每次都提醒，别让用户蒙在鼓里。
+        print("提示：波段之门词汇域独立，建议加 --no-expand 避免短线同义词引入噪声。\n")
     rows = search(connection, query, args.source, args.author, args.limit)
 
     # 整句无结果时按已知术语切词重试。
@@ -995,6 +999,25 @@ def main() -> int:
                     else:
                         reason = "有效命中不足，输出被弱相关块占满"
                     print(f"{reason}，已按术语切词重试：{' / '.join(pieces)}\n")
+
+    # 逐字命中短路（2026-08-24 价值审计发现）：整句恰好逐字命中某张卡时，
+    # 上面所有重切都不触发（有结果、有正文命中、强候选也在），只回 1-2 条
+    # 同一文档的结果——「怎么知道谁是情绪核心」就因此只出方法卡，
+    # 底下 1825 块「龙头」语料一块没露面，用户无从知道证据面这么窄。
+    # 处理：结果 ≤2 条且全部来自同一文档时，把切词召回**并入**现有结果
+    # （精准命中保持在前，证据面补宽）。limit=1 时尊重调用方意图不并。
+    if 1 < args.limit and 0 < len(rows) <= 2 and len({r["document_id"] for r in rows}) == 1:
+        pieces = split_sentence(query)
+        if pieces and pieces != terms_from_query(query):
+            extra_rows = search(
+                connection, " ".join(pieces), args.source, args.author, args.limit
+            )
+            seen = {r["chunk_id"] for r in rows}
+            extra = [r for r in extra_rows if r["chunk_id"] not in seen]
+            if extra:
+                rows = list(rows) + extra
+                if not args.json:
+                    print(f"逐字命中较窄，已并入切词召回：{' / '.join(pieces)}\n")
     results = []
     for row in rows:
         item = dict(row)
@@ -1013,7 +1036,16 @@ def main() -> int:
         print("未找到匹配结果。")
         return 1
     for index, item in enumerate(results, start=1):
-        preview = item["text"].replace("\n", " ")[: max(args.preview, 0)]
+        raw_preview = item["text"].replace("\n", " ")
+        if len(raw_preview) > max(args.preview, 0):
+            # 截断退到句子边界：此前硬切常断在半句（「四：中报 中报往年都是炒业绩」）。
+            cut = raw_preview[: max(args.preview, 0)]
+            stop = max(cut.rfind(s) for s in ("。", "！", "？", "；"))
+            if stop > max(args.preview, 0) * 0.6:
+                cut = cut[:stop + 1]
+            preview = cut + f"…〔预览已截断，全文 {len(raw_preview)} 字，--preview 可放宽〕"
+        else:
+            preview = raw_preview
         citation = f"[{item.get('source_name') or item['source_id']}｜{item.get('author') or '未标注'}｜{item['title']}｜{item.get('date') or '日期未标注'}｜{item['locator']}]"
         print(f"\n#{index} {citation}")
         print(f"类型: {item['chunk_type']} | 主题: {item.get('topics') or '未标注'} | ID: {item['chunk_id']}")
