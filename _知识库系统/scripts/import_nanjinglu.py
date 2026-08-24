@@ -97,7 +97,18 @@ def group_units(units: list[dict], target_chars: int) -> list[list[dict]]:
 # without which 660px screenshots came out worse than the v1 whole-page path did;
 # v4 lets the embedded images carry the prose on pages with no usable text layer,
 # where they beat the page raster on the same text.
-CACHE_VERSION = 4
+# v5（2026-08-24）：OCR 引擎 Windows OCR → RapidOCR。A/B 实测（_bench_ocr.py，
+# 文本层页做 ground truth）：还原率 40.2%→92.4%@140dpi、31.9%→93.0%@300dpi。
+# v6（2026-08-24 同日）：kb_import_utils 加双引擎兜底后重跑——《去弱留强》
+# 《题材是否抬头》两篇共 9787 字被 rapid 读成乱汤，兜底让这类页自动回退
+# Windows 择优。bump 让 v5 缓存里已固化的失灵文本全部失效。
+# v7（2026-08-24 同日）：兜底判据从「汉字数<25」升级为「汉字数过少或拉丁数字
+# 占比>0.40」（郁金香式假汉字乱码拦不住纯字数判据）。v6 跑到一半被停，缓存
+# 混着两种判据的结果，一并作废。
+# v8（2026-08-24 同日）：兜底救不了「半读」——《题材是否抬头》18 个可信片段
+# 0% 存留但 rapid 输出躲过了全部失灵判据。改 engine="dual"：两台引擎都跑、
+# 逐图取汉字多者。代价是每图两次识别，本源只有 ~500 图，可承受。
+CACHE_VERSION = 8
 
 
 def load_cache(path: Path, source_hash: str, dpi: int) -> dict | None:
@@ -227,7 +238,9 @@ def extract_pdf(
             }
 
         if to_ocr:
-            ocr_result = ocr_images(to_ocr)
+            # dual：rapid 在《题材是否抬头》等文档上「半读」（18 个可信片段 0% 存留），
+            # 失灵判据拦不住半读，两台引擎都跑逐图取汉字多者（2026-08-24）
+            ocr_result = ocr_images(to_ocr, engine="dual")
             for index, keys in page_keys.items():
                 pending = pages[index - 1] or {}
                 embedded = pending.get("text", "")
@@ -322,7 +335,9 @@ def extract_image(path: Path, doc_id: str, source_hash: str, *, force: bool) -> 
     cached = None if force else load_cache(cache_path, source_hash, 0)
     if cached:
         return [cached], []
-    result = ocr_images([("1", path)]).get("1", {"text": "", "error": "no_result", "tiles": 0})
+    result = ocr_images([("1", path)], engine="dual").get(
+        "1", {"text": "", "error": "no_result", "tiles": 0}
+    )
     text = clean_text(result.get("text", ""), ocr=True)
     item = {
         "source_hash": source_hash, "cache_version": CACHE_VERSION, "dpi": 0, "page": 1,

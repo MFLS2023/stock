@@ -51,7 +51,14 @@ CONVERTER = Path(__file__).with_name("convert_doc_to_docx.ps1")
 OCR_TARGET_WIDTH = 2000
 # Bumped when the OCR input changes shape, so existing per-image caches are recomputed
 # rather than silently mixing pre- and post-upscale text.
-OCR_CACHE_VERSION = 2
+# v3（2026-08-24）：引擎 Windows OCR → RapidOCR。A/B 实测坏块率 17%→0%
+# （_bench_engine_ab.py --retulip，生产同款分片），CJK 率持平、界面垃圾更少。
+# v4（2026-08-24 同日）：全量对比发现 rapid 在《22截屏》等美图截图上输出
+# 「写K不_TT」式假汉字乱码（旧版这些页是通顺正文，六个文档共丢约 4 万汉字）。
+# kb_import_utils 兜底判据升级后重跑：失灵图自动回退 Windows 择优。
+# v5（2026-08-24 同日）：v4 复测四篇受灾文档保留率仅 21-48%——「半读」躲过了
+# 失灵判据。改 engine="dual" 全量双引擎逐图取多者，不再依赖判据。
+OCR_CACHE_VERSION = 5
 
 NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
@@ -315,7 +322,9 @@ def cache_ocr(items: list[tuple[str, Path]], force: bool) -> tuple[dict[str, dic
             ocr_path, scaled_to = upscale_for_ocr(path, work_dir)
             prepared.append((key, ocr_path))
             scaled[key] = scaled_to
-        fresh = ocr_images(prepared, batch_size=20)
+        # dual：全量对比发现 rapid 在部分美图长截图上「半读」（21-48% 真内容丢失），
+        # 失灵判据拦不住半读，只能两台引擎都跑逐图取汉字多者（2026-08-24）
+        fresh = ocr_images(prepared, batch_size=20, engine="dual")
         for key, path in missing:
             raw = fresh.get(key, {"text": "", "error": "no_result", "tiles": 0})
             item = {

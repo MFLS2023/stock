@@ -101,7 +101,13 @@ ALT_EXTS = {".html", ".mhtml", ".docx", ".pdf"}
 # 重算」，这里没有，导致换了 OCR 引擎旧缓存照样命中、新引擎永远不生效。
 # 规则与 import_tulip_garden.py:299 一致：读缓存时校验版本，不符按未命中重算并覆写。
 # 改 OCR 引擎 / 预处理 / clean_text(ocr=True) 时 bump 这个数。
-OCR_CACHE_VERSION = 1
+# v2（2026-08-24）：引擎 Windows OCR → RapidOCR。A/B 实测 K 线图坏块率 3%→0%
+# （_bench_engine_ab.py），付费扫描页与南京路同类扫描页同证据（还原率 40%→92%）。
+OCR_CACHE_VERSION = 2
+
+# 付费扫描页缓存的独立版本键（2026-08-24）。与 OCR_CACHE_VERSION 解耦：
+# 付费层改 dual 引擎只需 bump 这一个，3908 张 K 线图缓存不受牵连重跑。
+PDF_OCR_CACHE_VERSION = 1
 
 
 def sha256_file(path: Path) -> str:
@@ -437,10 +443,10 @@ def extract_pdf_pages(path: Path, *, ocr_scanned: bool = False, cache_dir: Path 
             if not ocr_scanned:
                 units.append({"locator": f"第{index}页", "text": text, "method": "low_text", "confidence": "low"})
                 continue
-            # 版本号拼进摘要串：bump OCR_CACHE_VERSION 即换一批缓存文件名，
+            # 版本号拼进摘要串：bump PDF_OCR_CACHE_VERSION 即换一批缓存文件名，
             # 旧文件自然失效（留在目录里不碍事，想清理可删 pdf-*.json）。
             digest = hashlib.sha256(
-                f"{path}|{index}|{dpi}|ocrv{OCR_CACHE_VERSION}".encode("utf-8")
+                f"{path}|{index}|{dpi}|pdfv{PDF_OCR_CACHE_VERSION}".encode("utf-8")
             ).hexdigest()
             cache = (cache_dir / f"pdf-{digest[:16]}.json") if cache_dir else None
             if cache is not None and cache.exists():
@@ -470,7 +476,9 @@ def extract_pdf_pages(path: Path, *, ocr_scanned: bool = False, cache_dir: Path 
             units.append({"locator": f"第{index}页", "text": "", "method": "pdf_ocr", "confidence": "low", "_ocr_key": key,
                           "_cache": str(cache) if cache else ""})
         if pending:
-            results = ocr_images(pending)
+            # dual：《瑞·这波行情的规律》等扫描件在 rapid 下可信片段保留率仅 4%
+            # （半读躲过失灵判据），两台引擎都跑逐图取汉字多者（2026-08-24）
+            results = ocr_images(pending, engine="dual")
             for unit in units:
                 key = unit.pop("_ocr_key", None)
                 cache_path = unit.pop("_cache", "")

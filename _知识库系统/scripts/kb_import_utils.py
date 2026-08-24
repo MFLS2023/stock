@@ -6,12 +6,14 @@ from __future__ import annotations
 import difflib
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
 import tempfile
 import unicodedata
 from collections.abc import Callable, Iterable, Sequence
+from functools import lru_cache
 from pathlib import Path
 
 # Pillow is imported inside ocr_images(), not here. This module also holds the LF writing
@@ -468,6 +470,137 @@ def _merge_tile_texts(texts: Sequence[str]) -> str:
     return clean_text("\n".join(merged), ocr=True)
 
 
+def cjk_count(text: str) -> int:
+    """汉字数（U+4E00–U+9FFF）。双引擎兜底与质量判定的公共口径。"""
+    return sum(1 for ch in text if "一" <= ch <= "鿿")
+
+
+def _prepare_tiles(
+    batch: Sequence[tuple[str, Path]],
+    work: Path,
+    *,
+    max_dimension: int,
+    overlap: int,
+) -> dict[str, list[Path]]:
+    """把一批图按生产口径切成 PNG 分片，返回 key → 分片路径列表。
+
+    预处理与引擎无关，两条 OCR 路径共用这一份：EXIF 转正、转 RGB、宽超过
+    max_dimension 先等比缩、再竖向分片（_tile_boxes）。2026-08-24 从 ocr_images
+    里抽出来——RapidOCR 通道进来时如果各写一份预处理，跑着跑着就会分叉。
+    """
+    from PIL import Image, ImageOps
+
+    tile_map: dict[str, list[Path]] = {}
+    for item_index, (key, image_path) in enumerate(batch, start=1):
+        # 文件名必须含 key 的派生量：调用方可能逐条调本函数（item_index 恒为 1），
+        # 同一个 work 目录里只靠序号会互相覆盖 —— 2026-08-24 课程讲义全变成同一页
+        # 就是这么来的。key 里可能有路径分隔符等非法字符，清洗后截断。
+        safe_key = re.sub(r"[^\w.-]", "_", str(key))[:40] or "img"
+        tile_outputs: list[Path] = []
+        with Image.open(image_path) as opened:
+            image = ImageOps.exif_transpose(opened).convert("RGB")
+            if image.width > max_dimension:
+                ratio = max_dimension / image.width
+                image = image.resize((max_dimension, max(1, int(image.height * ratio))))
+            for tile_index, box in enumerate(
+                _tile_boxes(image.width, image.height, max_dimension, overlap), start=1
+            ):
+                tile_path = work / f"{item_index:03d}-{safe_key}-tile-{tile_index:03d}.png"
+                image.crop(box).save(tile_path, format="PNG")
+                tile_outputs.append(tile_path)
+        tile_map[key] = tile_outputs
+    return tile_map
+
+
+def _run_windows_tiles(
+    tile_map: dict[str, list[Path]],
+    work: Path,
+    *,
+    language: str,
+) -> None:
+    """调 windows_ocr_batch.ps1 把每个分片识别成同名 .txt。"""
+    manifest_rows: list[dict] = []
+    for key, tile_outputs in tile_map.items():
+        for tile_path in tile_outputs:
+            manifest_rows.append({
+                "key": key,
+                "image_path": str(tile_path),
+                "output_path": str(tile_path.with_suffix(".txt")),
+            })
+    if not manifest_rows:
+        return
+    manifest_path = work / "manifest.json"
+    write_text_lf(manifest_path, json.dumps(manifest_rows, ensure_ascii=False))
+    command = [
+        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        str(BATCH_OCR_SCRIPT), "-ManifestPath", str(manifest_path), "-Language", language,
+    ]
+    completed = subprocess.run(
+        command, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
+
+
+def _run_rapid_tiles(tile_map: dict[str, list[Path]], *, language: str) -> None:
+    """用 RapidOCR 就地识别每个分片，结果写成分片同名 .txt（与 Windows 路径同构）。
+
+    RapidOCR 模型随包自带、纯 CPU 推理、不联网。``language`` 参数仅为保持与
+    Windows 路径相同的调用形状，RapidOCR 的中英混模型不区分语言。
+    """
+    import numpy as np
+    from PIL import Image
+
+    engine = _rapid_engine()
+    for tile_outputs in tile_map.values():
+        for tile_path in tile_outputs:
+            with Image.open(tile_path) as tile_image:
+                array = np.asarray(tile_image.convert("RGB"))
+            result, _ = engine(array)
+            lines = [line[1] for line in (result or [])]
+            write_text_lf(tile_path.with_suffix(".txt"), "\n".join(lines))
+
+
+@lru_cache(maxsize=1)
+def _rapid_engine():
+    """进程内共享一个 RapidOCR 实例（模型加载约 1 秒，不能每个分片重建）。"""
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError as exc:  # pragma: no cover - 环境缺包时的兜底提示
+        raise SystemExit(
+            "KB_OCR_ENGINE=rapid 但 rapidocr_onnxruntime 未安装。\n"
+            "安装：pip install rapidocr_onnxruntime；或回退 Windows 引擎：set KB_OCR_ENGINE=windows"
+        ) from exc
+    return RapidOCR()
+
+
+# OCR 引擎选择（2026-08-24 起）。默认 rapid：A/B 实测全面胜出 ——
+#   南京路文本层页还原率 92.4% vs Windows 40.2%（_bench_ocr.py，同页同 DPI）
+#   生产素材坏块率（孤立部首≥2）：K 线 3%→0%、郁金香截图 17%→0%、讲义 75%→0%
+# 且对 DPI 不敏感。回退方式：环境变量 KB_OCR_ENGINE=windows。
+OCR_ENGINE = os.environ.get("KB_OCR_ENGINE", "rapid").strip().lower()
+
+# 双引擎兜底阈值（2026-08-24）。RapidOCR 在个别材质上会整页失灵——实测两种病：
+#   ① 南京路《去弱留强》：6241 字正文读成字母数字乱汤（几乎无汉字）；
+#   ② 郁金香《22截屏》美图截图：输出「写K不_TT / $7.eX生EX」式假汉字乱码，
+#     汉字计数不低但拉丁/数字占比畸高，单看字数拦不住。
+# 判据（满足任一即视为失灵）：合并文本汉字数 < FLOOR，或非空白字符里
+# ASCII 字母数字占比 > LATinish 上限。失灵时用 Windows 引擎重跑同一组分片，
+# 谁认出的汉字多留谁。代价只在失灵图上发生。缓存存择优结果，来源不再区分。
+DUAL_ENGINE_FLOOR_CJK = 25
+DUAL_ENGINE_MAX_LATINISH = 0.40
+
+
+def _rapid_degenerate(text: str) -> bool:
+    non_space = [c for c in text if not c.isspace()]
+    if not non_space:
+        return True
+    if cjk_count(text) < DUAL_ENGINE_FLOOR_CJK:
+        return True
+    latinish = sum(1 for c in non_space if c.isascii() and c.isalnum())
+    return latinish / len(non_space) > DUAL_ENGINE_MAX_LATINISH
+
+
 def ocr_images(
     items: Sequence[tuple[str, Path]],
     *,
@@ -475,65 +608,77 @@ def ocr_images(
     max_dimension: int = 9000,
     overlap: int = 120,
     batch_size: int = 24,
+    engine: str | None = None,
 ) -> dict[str, dict]:
-    """OCR images in persistent PowerShell batches and return text/error metadata.
+    """OCR images and return text/error metadata（入口按引擎分流）。
 
-    Pillow is imported here rather than at module level so that importing this module for
-    its writing helpers alone needs nothing beyond the standard library.
+    ``engine`` 缺省用全局 OCR_ENGINE；显式传 "dual" 时两台引擎都跑、逐图取
+    汉字多者 —— 为「半读」而生：rapid 有时只认出页面一小角（几百字躲过一切
+    失灵判据），实测南京路《题材是否抬头》18 个可信片段 0% 存留、郁金香四篇
+    21-48%。代价是每张图都付两次识别，只给小体量、正文密集的来源用。
+
+    预处理（分片）两引擎共用 _prepare_tiles；识别各自走 _run_windows_tiles /
+    _run_rapid_tiles，输出统一为「每分片一个 .txt」再 _merge_tile_texts 合并，
+    保证两条路径的可比性与可替换性。
     """
-    from PIL import Image, ImageOps
-
+    chosen_engine = (engine or OCR_ENGINE).strip().lower()
+    if chosen_engine not in ("rapid", "windows", "dual"):
+        raise ValueError(f"未知 OCR 引擎：{chosen_engine}")
     TEMP_ROOT.mkdir(parents=True, exist_ok=True)
     results: dict[str, dict] = {}
     for batch_start in range(0, len(items), batch_size):
         batch = items[batch_start:batch_start + batch_size]
         work = Path(tempfile.mkdtemp(prefix="ocr-", dir=TEMP_ROOT))
-        manifest_rows: list[dict] = []
-        tile_map: dict[str, list[Path]] = {}
         try:
-            for item_index, (key, image_path) in enumerate(batch, start=1):
-                tile_outputs: list[Path] = []
+            prepared: dict[str, list[Path]] = {}
+            for key, image_path in batch:
                 try:
-                    with Image.open(image_path) as opened:
-                        image = ImageOps.exif_transpose(opened).convert("RGB")
-                        if image.width > max_dimension:
-                            ratio = max_dimension / image.width
-                            image = image.resize((max_dimension, max(1, int(image.height * ratio))))
-                        for tile_index, box in enumerate(
-                            _tile_boxes(image.width, image.height, max_dimension, overlap), start=1
-                        ):
-                            tile_path = work / f"image-{item_index:03d}-tile-{tile_index:03d}.png"
-                            output_path = tile_path.with_suffix(".txt")
-                            image.crop(box).save(tile_path, format="PNG")
-                            tile_outputs.append(output_path)
-                            manifest_rows.append(
-                                {"key": key, "image_path": str(tile_path), "output_path": str(output_path)}
-                            )
-                    tile_map[key] = tile_outputs
+                    prepared[key] = _prepare_tiles(
+                        [(key, image_path)], work,
+                        max_dimension=max_dimension, overlap=overlap,
+                    )[key]
                 except Exception as exc:  # corrupt/unsupported images are recorded, not fatal
                     results[key] = {"text": "", "error": f"prepare_failed: {exc}", "tiles": 0}
-            if manifest_rows:
-                manifest_path = work / "manifest.json"
-                write_text_lf(manifest_path, json.dumps(manifest_rows, ensure_ascii=False))
-                command = [
-                    "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                    str(BATCH_OCR_SCRIPT), "-ManifestPath", str(manifest_path), "-Language", language,
-                ]
-                completed = subprocess.run(
-                    command, capture_output=True, text=True, encoding="utf-8", errors="replace"
-                )
-                if completed.returncode != 0:
-                    raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
-            for key, output_paths in tile_map.items():
-                tile_texts = [path.read_text(encoding="utf-8") for path in output_paths if path.exists()]
-                if len(tile_texts) != len(output_paths):
-                    results[key] = {
-                        "text": _merge_tile_texts(tile_texts),
-                        "error": f"missing_tile_outputs: {len(output_paths) - len(tile_texts)}",
-                        "tiles": len(output_paths),
-                    }
-                else:
-                    results[key] = {"text": _merge_tile_texts(tile_texts), "error": "", "tiles": len(output_paths)}
+            tile_map = {k: v for k, v in prepared.items() if v is not None}
+
+            def read_key(key: str) -> str:
+                return _merge_tile_texts([
+                    p.with_suffix(".txt").read_text(encoding="utf-8")
+                    for p in tile_map[key] if p.with_suffix(".txt").exists()
+                ])
+
+            missing_by_key = {
+                k: sum(1 for p in v if not p.with_suffix(".txt").exists())
+                for k, v in tile_map.items()
+            }
+
+            if chosen_engine == "windows":
+                _run_windows_tiles(tile_map, work, language=language)
+                for key in tile_map:
+                    results[key] = {"text": read_key(key), "error": "", "tiles": len(tile_map[key])}
+                continue
+
+            _run_rapid_tiles(tile_map, language=language)
+            rapid_texts = {key: read_key(key) for key in tile_map}
+
+            if chosen_engine == "rapid":
+                for key in tile_map:
+                    merged = rapid_texts[key]
+                    # 兜底：这张图明显失灵（没字/拉丁汤）时用 Windows 重试，谁认出的汉字多留谁
+                    if not missing_by_key[key] and _rapid_degenerate(merged):
+                        _run_windows_tiles({key: tile_map[key]}, work, language=language)
+                        alt = read_key(key)
+                        if cjk_count(alt) > cjk_count(merged):
+                            merged = alt
+                    results[key] = {"text": merged, "error": "", "tiles": len(tile_map[key])}
+                continue
+
+            # dual：Windows 再跑一遍全部图，逐图取汉字多者
+            _run_windows_tiles(tile_map, work, language=language)
+            for key in tile_map:
+                win_text = read_key(key)
+                merged = win_text if cjk_count(win_text) > cjk_count(rapid_texts[key]) else rapid_texts[key]
+                results[key] = {"text": merged, "error": "", "tiles": len(tile_map[key])}
         finally:
             shutil.rmtree(work, ignore_errors=True)
     return results
