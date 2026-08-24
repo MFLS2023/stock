@@ -41,6 +41,7 @@
 - 2026-05-20｜尽力了｜nanjinglu-fce2dc1a02a2
 - 2026-06-09｜无言｜nanjinglu-2087cb416807
 - 2026-06-28｜情绪周期在产业趋势投资中的应用｜nanjinglu-92154afd0e2c
+- 2026-08-09｜风起云涌｜nanjinglu-edc0dc8d5c09
 - 日期未标注｜从零开始，一文搭建情绪周期｜nanjinglu-60408d15eb48
 - 日期未标注｜彼岸写字的地方-1011｜nanjinglu-425db1ade632
 - 日期未标注｜静待风起｜nanjinglu-568918f184c7

@@ -315,6 +315,92 @@ def test_end_to_end_extraction_is_stable() -> None:
           f"无方向 {report.skipped_no_direction} 处被丢）")
 
 
+def _restating(sentence: str) -> bool:
+    """走生产调用链判时态：先按点位切句，再判。
+
+    直接把整串喂给 is_restating_past 会跨分句取词
+    （「结论:只能上涨了」里的「上涨了」不属于点位所在分句），那不是生产路径。
+    """
+    match = next(bt.POINT.finditer(sentence), None)
+    scope = bt.sentence_around(sentence, match.start()) if match else sentence
+    return bt.is_restating_past(scope)
+
+
+def test_sentence_around_stops_at_clause_boundaries() -> None:
+    """切句要在 。！？；：\\n 处断开。
+
+    冒号必须算边界：「如果明天跌破3733点,我只会给你一个结论:只能上涨了」
+    冒号后是另一个分句，那里的「上涨了」不代表点位所在分句是复述。
+    """
+    text = "昨天已经涨了不少。我的计划是,等涨过3439点,我才考虑加仓"
+    assert bt.sentence_around(text, text.index("3439")) == "我的计划是,等涨过3439点,我才考虑加仓"
+    text2 = "如果明天跌破3733点,我只会给你一个结论:只能上涨了"
+    assert "上涨了" not in bt.sentence_around(text2, text2.index("3733"))
+
+
+def test_past_tense_detected_after_the_level() -> None:
+    """审查报告 P0-2：过去时词在点位**之后**时也要抓住。
+
+    原实现只看点位前 40 字，而中文复述句的过去时词常落在点位后
+    （「跌到3144点,跌了快300点了」里「跌了」在点位后第 1 个字），
+    于是这条复述被当成「预测跌到3144」并判为 60 日命中。
+    """
+    assert _restating("从3418点跌到3144点,跌了快300点了,人家反弹几天不应该吗?")
+    assert _restating("我当初的预想是什么?是明天的14:45左右,跌破3016点,事实是提前了")
+    # 「动词+了」是通用完成体标记，逐词穷举补不完（曾漏过「调整了」）
+    assert _restating("从4034点下跌到3816点,大盘调整了大约5%")
+
+
+def test_past_tense_does_not_eat_neighbouring_sentence() -> None:
+    """按句检测不能放宽成整段，否则误杀隔句的真预测（审查报告 P1-5 同类）。"""
+    assert not _restating("昨天已经涨了不少。我的计划是,大盘可以涨,等涨过3439点,我才考虑是否加大仓位")
+    assert not _restating("而如果今天或者明天跌破3733点,我只会给你一个结论:只能上涨了")
+
+
+def test_ambiguous_time_words_need_forward_marker() -> None:
+    """中文时间词不含时态，「今天」既能指过去也能指将来，须看同句有无前瞻标记。"""
+    # 有前瞻标记 → 预测
+    assert not _restating("如果明天不过4096点,那会发生什么?")
+    # 无前瞻标记且是既成事实 → 复述
+    assert _restating("本周一,跌破3800点,到达3794点,这是大部分人想不到的")
+    assert _restating("午后,在股指下跌到3354点的时候,反弹了")
+    assert _restating("本周四,跌到3123点时,突然中期转多了")
+
+
+def test_condition_opener_is_forward_unless_counterfactual() -> None:
+    """句首条件引导词默认前瞻，但带过去时间词的是反事实假设。
+
+    「只要没有跌破3910点,…上涨结束了」= 前瞻，从句里的「结束了」是被假设的事。
+    「如果昨天下午不过4096点,那会发生什么?」= 对已发生的事做假想，不是预测。
+    """
+    assert not _restating("只要没有跌破3910点,我们都不能肯定始于3815的上涨结束了")
+    assert _restating("如果昨天下午不过4096点,那会发生什么?")
+
+
+def test_intraday_reading_survives_tense_filter() -> None:
+    """当日读数「今天的阻力位在X点」是前瞻，不能被时态过滤当复述剔掉。
+
+    实测曾误杀 3 条，日内样本从 7 条掉到 4 条。
+    """
+    assert not _restating("今天的阻力位在3493点左右,我中午怕你们短线冲动")
+    assert not _restating("今天上涨的阻力位在3933点,支撑在3902点")
+    assert not _restating("股指今天的强阻力在3168点,到了这里可以适当高抛一下")
+
+
+def test_subject_switch_excludes_whole_block() -> None:
+    """他明说「我今天分析一下上证50」之后，段内点位都不该拿去对上证指数。
+
+    [2024-09-04]「我判断,最后的目标可能要跌破2248点」里的 2248 是上证50 的
+    第二目标（原文「应一部分读者的要求,我今天分析一下上证50」），
+    而「上证50」距点位约 90 字，超出 OTHER_SYMBOL 的 80 字窗口。
+    不能靠加大字符窗口解决 —— 那会重新引入 P1-5 记录的 12 处误伤。
+    """
+    assert bt.SUBJECT_SWITCH.search("应一部分读者的要求,我今天分析一下上证50")
+    assert bt.SUBJECT_SWITCH.search("上午的收盘在2276点,理论上,只差28点了,上证50, 加油!")
+    # 顺口一提不算切换：这句仍在讲上证指数
+    assert not bt.SUBJECT_SWITCH.search("要分析上证,必须要分析上证50和沪深300,它俩不到底,上证很难到底")
+
+
 def main() -> int:
     tests = [value for name, value in sorted(globals().items())
              if name.startswith("test_") and callable(value)]

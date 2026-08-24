@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-04T07:41:16.406361+00:00",
+  "generated_at": "2026-08-09T09:59:21.489094+00:00",
   "sources": {
     "fulibei": {
       "source_name": "复利杯",
@@ -10,15 +10,15 @@
     },
     "nanjinglu_bian": {
       "source_name": "南京路彼岸",
-      "documents": 42,
-      "chunks": 525,
+      "documents": 43,
+      "chunks": 586,
       "date_start": "2025-06-18",
-      "date_end": "2026-06-28"
+      "date_end": "2026-08-09"
     },
     "tulip_garden": {
       "source_name": "郁金香花园",
       "documents": 42,
-      "chunks": 1181,
+      "chunks": 1213,
       "date_start": "2022-09-21",
       "date_end": "2026-01-18"
     },
@@ -31,185 +31,242 @@
     },
     "aizaibingchuan": {
       "source_name": "爱在冰川",
-      "documents": 2537,
-      "chunks": 5813,
+      "documents": 2609,
+      "chunks": 7338,
       "date_start": "2017-06-09",
       "date_end": "2026-08-03"
+    },
+    "kongkonglong": {
+      "source_name": "主升龙头空空龙",
+      "documents": 14,
+      "chunks": 172,
+      "date_start": "2026-04-18",
+      "date_end": "2026-06-21"
+    },
+    "boduanzhimen": {
+      "source_name": "波段之门",
+      "documents": 849,
+      "chunks": 7986,
+      "date_start": "2012-01-29",
+      "date_end": "2026-07-14"
     }
   },
   "topics": {
+    "题材与板块": {
+      "document_counts": {
+        "fulibei": 72,
+        "nanjinglu_bian": 28,
+        "tulip_garden": 26,
+        "panfeng": 9,
+        "aizaibingchuan": 1610,
+        "kongkonglong": 7,
+        "boduanzhimen": 354
+      },
+      "chunk_counts": {
+        "fulibei": 989,
+        "nanjinglu_bian": 462,
+        "tulip_garden": 761,
+        "panfeng": 9,
+        "aizaibingchuan": 5004,
+        "kongkonglong": 156,
+        "boduanzhimen": 4359
+      }
+    },
     "趋势与容量": {
       "document_counts": {
         "fulibei": 40,
         "nanjinglu_bian": 32,
         "tulip_garden": 14,
         "panfeng": 18,
-        "aizaibingchuan": 1653
+        "aizaibingchuan": 1706,
+        "kongkonglong": 5,
+        "boduanzhimen": 141
       },
       "chunk_counts": {
         "fulibei": 457,
-        "nanjinglu_bian": 411,
-        "tulip_garden": 483,
+        "nanjinglu_bian": 489,
+        "tulip_garden": 387,
         "panfeng": 28,
-        "aizaibingchuan": 3402
-      }
-    },
-    "题材与板块": {
-      "document_counts": {
-        "fulibei": 72,
-        "nanjinglu_bian": 29,
-        "tulip_garden": 26,
-        "panfeng": 9,
-        "aizaibingchuan": 1587
-      },
-      "chunk_counts": {
-        "fulibei": 989,
-        "nanjinglu_bian": 426,
-        "tulip_garden": 748,
-        "panfeng": 9,
-        "aizaibingchuan": 3955
+        "aizaibingchuan": 4158,
+        "kongkonglong": 31,
+        "boduanzhimen": 1533
       }
     },
     "复盘与计划": {
       "document_counts": {
         "fulibei": 32,
         "nanjinglu_bian": 23,
-        "tulip_garden": 8,
+        "tulip_garden": 7,
         "panfeng": 5,
-        "aizaibingchuan": 1277
+        "aizaibingchuan": 1287,
+        "kongkonglong": 0,
+        "boduanzhimen": 170
       },
       "chunk_counts": {
         "fulibei": 434,
-        "nanjinglu_bian": 264,
-        "tulip_garden": 131,
+        "nanjinglu_bian": 285,
+        "tulip_garden": 129,
         "panfeng": 7,
-        "aizaibingchuan": 3575
+        "aizaibingchuan": 4700,
+        "boduanzhimen": 1748
       }
     },
     "打板与接力": {
       "document_counts": {
         "fulibei": 35,
         "nanjinglu_bian": 19,
-        "tulip_garden": 15,
+        "tulip_garden": 17,
         "panfeng": 7,
-        "aizaibingchuan": 1032
+        "aizaibingchuan": 1068,
+        "kongkonglong": 9,
+        "boduanzhimen": 23
       },
       "chunk_counts": {
         "fulibei": 465,
-        "nanjinglu_bian": 317,
-        "tulip_garden": 534,
+        "nanjinglu_bian": 315,
+        "tulip_garden": 639,
         "panfeng": 8,
-        "aizaibingchuan": 2851
+        "aizaibingchuan": 3821,
+        "kongkonglong": 166,
+        "boduanzhimen": 337
       }
     },
     "情绪周期": {
       "document_counts": {
         "fulibei": 51,
-        "nanjinglu_bian": 31,
+        "nanjinglu_bian": 33,
         "tulip_garden": 28,
         "panfeng": 15,
-        "aizaibingchuan": 844
+        "aizaibingchuan": 861,
+        "kongkonglong": 2,
+        "boduanzhimen": 180
       },
       "chunk_counts": {
         "fulibei": 717,
-        "nanjinglu_bian": 466,
-        "tulip_garden": 595,
+        "nanjinglu_bian": 532,
+        "tulip_garden": 617,
         "panfeng": 27,
-        "aizaibingchuan": 2001
+        "aizaibingchuan": 2496,
+        "kongkonglong": 94,
+        "boduanzhimen": 1871
+      }
+    },
+    "预期与超预期": {
+      "document_counts": {
+        "fulibei": 0,
+        "nanjinglu_bian": 21,
+        "tulip_garden": 30,
+        "panfeng": 15,
+        "aizaibingchuan": 807,
+        "kongkonglong": 6,
+        "boduanzhimen": 107
+      },
+      "chunk_counts": {
+        "nanjinglu_bian": 273,
+        "tulip_garden": 1005,
+        "panfeng": 22,
+        "aizaibingchuan": 2600,
+        "kongkonglong": 97,
+        "boduanzhimen": 1275
+      }
+    },
+    "竞价与盘口": {
+      "document_counts": {
+        "fulibei": 20,
+        "nanjinglu_bian": 9,
+        "tulip_garden": 34,
+        "panfeng": 4,
+        "aizaibingchuan": 756,
+        "kongkonglong": 6,
+        "boduanzhimen": 142
+      },
+      "chunk_counts": {
+        "fulibei": 274,
+        "nanjinglu_bian": 144,
+        "tulip_garden": 1165,
+        "panfeng": 5,
+        "aizaibingchuan": 2602,
+        "kongkonglong": 103,
+        "boduanzhimen": 1673
+      }
+    },
+    "仓位与回撤": {
+      "document_counts": {
+        "fulibei": 66,
+        "nanjinglu_bian": 7,
+        "tulip_garden": 8,
+        "panfeng": 13,
+        "aizaibingchuan": 552,
+        "kongkonglong": 2,
+        "boduanzhimen": 306
+      },
+      "chunk_counts": {
+        "fulibei": 910,
+        "nanjinglu_bian": 44,
+        "tulip_garden": 47,
+        "panfeng": 21,
+        "aizaibingchuan": 1943,
+        "kongkonglong": 54,
+        "boduanzhimen": 3417
       }
     },
     "低吸与半路": {
       "document_counts": {
         "fulibei": 20,
         "nanjinglu_bian": 10,
-        "tulip_garden": 17,
+        "tulip_garden": 18,
         "panfeng": 14,
-        "aizaibingchuan": 800
+        "aizaibingchuan": 812,
+        "kongkonglong": 3,
+        "boduanzhimen": 73
       },
       "chunk_counts": {
         "fulibei": 224,
-        "nanjinglu_bian": 95,
-        "tulip_garden": 515,
+        "nanjinglu_bian": 130,
+        "tulip_garden": 637,
         "panfeng": 21,
-        "aizaibingchuan": 2280
-      }
-    },
-    "预期与超预期": {
-      "document_counts": {
-        "fulibei": 0,
-        "nanjinglu_bian": 19,
-        "tulip_garden": 27,
-        "panfeng": 15,
-        "aizaibingchuan": 763
-      },
-      "chunk_counts": {
-        "nanjinglu_bian": 215,
-        "tulip_garden": 952,
-        "panfeng": 22,
-        "aizaibingchuan": 1976
-      }
-    },
-    "竞价与盘口": {
-      "document_counts": {
-        "fulibei": 20,
-        "nanjinglu_bian": 7,
-        "tulip_garden": 35,
-        "panfeng": 4,
-        "aizaibingchuan": 698
-      },
-      "chunk_counts": {
-        "fulibei": 274,
-        "nanjinglu_bian": 112,
-        "tulip_garden": 1139,
-        "panfeng": 5,
-        "aizaibingchuan": 1852
-      }
-    },
-    "仓位与回撤": {
-      "document_counts": {
-        "fulibei": 66,
-        "nanjinglu_bian": 6,
-        "tulip_garden": 8,
-        "panfeng": 13,
-        "aizaibingchuan": 510
-      },
-      "chunk_counts": {
-        "fulibei": 910,
-        "nanjinglu_bian": 34,
-        "tulip_garden": 47,
-        "panfeng": 21,
-        "aizaibingchuan": 1376
-      }
-    },
-    "筹码与量价": {
-      "document_counts": {
-        "fulibei": 0,
-        "nanjinglu_bian": 2,
-        "tulip_garden": 30,
-        "panfeng": 6,
-        "aizaibingchuan": 522
-      },
-      "chunk_counts": {
-        "nanjinglu_bian": 40,
-        "tulip_garden": 1042,
-        "panfeng": 7,
-        "aizaibingchuan": 1361
+        "aizaibingchuan": 3061,
+        "kongkonglong": 17,
+        "boduanzhimen": 923
       }
     },
     "卖点与退出": {
       "document_counts": {
         "fulibei": 13,
-        "nanjinglu_bian": 16,
+        "nanjinglu_bian": 13,
         "tulip_garden": 3,
         "panfeng": 9,
-        "aizaibingchuan": 493
+        "aizaibingchuan": 505,
+        "kongkonglong": 1,
+        "boduanzhimen": 111
       },
       "chunk_counts": {
         "fulibei": 132,
-        "nanjinglu_bian": 151,
+        "nanjinglu_bian": 97,
         "tulip_garden": 127,
         "panfeng": 11,
-        "aizaibingchuan": 1278
+        "aizaibingchuan": 1673,
+        "kongkonglong": 6,
+        "boduanzhimen": 1146
+      }
+    },
+    "筹码与量价": {
+      "document_counts": {
+        "fulibei": 0,
+        "nanjinglu_bian": 4,
+        "tulip_garden": 29,
+        "panfeng": 6,
+        "aizaibingchuan": 499,
+        "kongkonglong": 7,
+        "boduanzhimen": 107
+      },
+      "chunk_counts": {
+        "nanjinglu_bian": 64,
+        "tulip_garden": 996,
+        "panfeng": 7,
+        "aizaibingchuan": 1613,
+        "kongkonglong": 155,
+        "boduanzhimen": 965
       }
     },
     "龙头与核心": {
@@ -218,30 +275,38 @@
         "nanjinglu_bian": 26,
         "tulip_garden": 9,
         "panfeng": 7,
-        "aizaibingchuan": 394
+        "aizaibingchuan": 394,
+        "kongkonglong": 9,
+        "boduanzhimen": 46
       },
       "chunk_counts": {
         "fulibei": 797,
-        "nanjinglu_bian": 378,
-        "tulip_garden": 183,
+        "nanjinglu_bian": 415,
+        "tulip_garden": 184,
         "panfeng": 9,
-        "aizaibingchuan": 1134
+        "aizaibingchuan": 1430,
+        "kongkonglong": 130,
+        "boduanzhimen": 537
       }
     },
     "心态与系统": {
       "document_counts": {
         "fulibei": 68,
-        "nanjinglu_bian": 15,
-        "tulip_garden": 21,
+        "nanjinglu_bian": 16,
+        "tulip_garden": 19,
         "panfeng": 8,
-        "aizaibingchuan": 245
+        "aizaibingchuan": 252,
+        "kongkonglong": 2,
+        "boduanzhimen": 75
       },
       "chunk_counts": {
         "fulibei": 943,
-        "nanjinglu_bian": 190,
-        "tulip_garden": 521,
+        "nanjinglu_bian": 218,
+        "tulip_garden": 523,
         "panfeng": 10,
-        "aizaibingchuan": 684
+        "aizaibingchuan": 920,
+        "kongkonglong": 17,
+        "boduanzhimen": 894
       }
     },
     "超预期": {
@@ -250,7 +315,9 @@
         "nanjinglu_bian": 0,
         "tulip_garden": 0,
         "panfeng": 0,
-        "aizaibingchuan": 0
+        "aizaibingchuan": 0,
+        "kongkonglong": 0,
+        "boduanzhimen": 0
       },
       "chunk_counts": {
         "fulibei": 629
@@ -262,7 +329,9 @@
         "nanjinglu_bian": 0,
         "tulip_garden": 0,
         "panfeng": 0,
-        "aizaibingchuan": 0
+        "aizaibingchuan": 0,
+        "kongkonglong": 0,
+        "boduanzhimen": 0
       },
       "chunk_counts": {
         "fulibei": 125

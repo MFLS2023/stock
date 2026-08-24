@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import difflib
+import io
 import json
 import re
 import shutil
@@ -129,6 +130,85 @@ def subtract_known_text(ocr_text: str, embedded_text: str, *, min_line_chars: in
         if meaningful_char_count(stripped) < min_line_chars or not already_known(stripped):
             kept.append(stripped)
     return clean_text("\n".join(kept), ocr=True)
+
+
+def extract_page_images(
+    page,
+    destination: Path,
+    prefix: str,
+    *,
+    min_dimension: int = 100,
+    min_pixels: int = 40000,
+    target_width: int = 1600,
+) -> list[dict]:
+    """Write a PDF page's embedded image objects to disk for OCR, skipping icons.
+
+    Why this exists instead of rendering the whole page: these article PDFs paste
+    market screenshots, and rendering the page re-samples them twice — once into the
+    page raster, once by whatever scale the page uses — while OCRing the objects
+    directly re-samples at most once. A second benefit is that prose and screenshots
+    arrive pre-separated, so the ``subtract_known_text`` n-gram pass is not needed
+    for these pages at all.
+
+    ``target_width`` is the part that took two attempts to get right. Extracting at
+    native resolution alone made things *worse* on a third of the pages: a per-page
+    comparison over the 103 comparable screenshot pages of this source scored 34
+    pages worse against 20 better. The split was purely by image width — pages that
+    regressed carried 660-666px screenshots, pages that improved carried 1080px ones.
+    A 665px image placed on a page that renders 1157px wide was being enlarged by the
+    old whole-page path, and Windows OCR needs that size to resolve dense Chinese
+    glyphs. Upscaling narrow images to 1600px recovered it (in-vocabulary character
+    rate 57.4% -> 89.5% on the regressed pages) and cost nothing on wide ones
+    (86.0% -> 88.2%), so it is applied unconditionally below the threshold.
+
+    Icons are filtered by size: WeChat exports embed 64x64 avatars and decorations
+    that only ever yield OCR noise. Both a minimum edge and a minimum area are
+    checked, because a legitimate one-line screenshot can be short (1080x120)
+    while still being wide.
+    """
+    from PIL import Image
+
+    destination.mkdir(parents=True, exist_ok=True)
+    results: list[dict] = []
+    try:
+        embedded = list(page.images)
+    except Exception as exc:
+        # A damaged image dictionary must not abort the page: the text layer and the
+        # whole-page fallback are still usable, so this is recorded and skipped.
+        return [{"error": f"page_images_failed: {exc}"}]
+
+    for index, image in enumerate(embedded, start=1):
+        name = getattr(image, "name", f"img{index}")
+        try:
+            data = image.data
+        except Exception as exc:
+            results.append({"error": f"image_data_failed: {exc}", "name": name})
+            continue
+        path = destination / f"{prefix}-img{index:03d}.png"
+        try:
+            with Image.open(io.BytesIO(data)) as opened:
+                width, height = opened.size
+                if min(width, height) < min_dimension or width * height < min_pixels:
+                    continue
+                # Normalise to PNG/RGB so the OCR batch gets one predictable format
+                # regardless of whether the source object was JPEG, PNG or CMYK.
+                image = opened.convert("RGB")
+                scaled_to = 0
+                if target_width and width < target_width:
+                    ratio = target_width / width
+                    image = image.resize(
+                        (target_width, max(1, round(height * ratio))), Image.LANCZOS
+                    )
+                    scaled_to = target_width
+                image.save(path, format="PNG")
+        except Exception as exc:
+            results.append({"error": f"image_decode_failed: {exc}", "name": name})
+            continue
+        results.append({
+            "path": path, "name": name, "width": width, "height": height,
+            "scaled_to": scaled_to,
+        })
+    return results
 
 
 def text_layer_is_usable(text: str, *, min_chars: int = 50, min_cjk_ratio: float = 0.5) -> bool:

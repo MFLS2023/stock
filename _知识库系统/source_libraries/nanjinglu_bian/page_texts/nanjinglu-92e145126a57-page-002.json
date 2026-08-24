@@ -1,16 +1,19 @@
 {
   "source_hash": "92e145126a577f34e81dfbf58f67f6a7389fb7955191531b4703d995851133eb",
+  "cache_version": 4,
   "dpi": 140,
   "page": 2,
   "method": "embedded",
   "confidence": "high",
   "text": "例如稳定币恒宝\n例如固态金龙羽\n例如 pcb 中京电子\n等辨识度票都走出来之后是不是觉得很神奇,是不是都想拍自己耳光,怎么\n又割肉或卖飞了龙头。后期有空会专门出一篇文章讲讲怎么去参与二波的问题。",
-  "ocr_residue": "",
-  "ocr_residue_chars": 0,
+  "ocr_residue": "前复 190\n0 前复权 37 . 4\n0 前复杈 1377",
+  "ocr_residue_chars": 21,
   "embedded_chars": 91,
-  "ocr_chars": 106,
+  "ocr_chars": 21,
   "embedded_cjk_ratio": 0.923,
-  "ocr_cjk_ratio": 0.849,
+  "ocr_cjk_ratio": 0.381,
   "ocr_error": "",
-  "ocr_tiles": 1
+  "ocr_tiles": 3,
+  "page_images": 3,
+  "embedded_usable": true
 }

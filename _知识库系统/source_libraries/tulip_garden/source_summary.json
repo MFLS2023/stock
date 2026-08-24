@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T01:12:06.262147+00:00",
+  "generated_at": "2026-08-09T09:51:41.023100+00:00",
   "source_id": "tulip_garden",
   "physical_files": 377,
   "documents": 42,
@@ -7,12 +7,12 @@
   "image_groups": 22,
   "external_images": 356,
   "ocr_images_total": 545,
-  "parents": 155,
-  "chunks": 1181,
-  "characters": 469437,
+  "parents": 161,
+  "chunks": 1213,
+  "characters": 486128,
   "extraction_counts": {
     "docx_xml": 5702,
-    "ocr": 532,
+    "ocr": 540,
     "markdown": 1
   },
   "errors": []

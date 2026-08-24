@@ -240,15 +240,48 @@ def extract_author_replies(comments: str) -> list[dict]:
     flush()
 
     replies: list[dict] = []
+    # 只有「作者回复紧跟在读者留言之后」才配对（审查报告 P1-6）。
+    #
+    # 原来是无条件往前找第一个非作者发言，而他在留言区经常连发多条独立发言，
+    # 于是连发的第 2、3… 条全部被挂到同一条读者留言上 ——
+    # 实测 637 条 (12.8%) 的 question 是错的，涉及 243 篇；
+    # 最严重一篇 `boduanzhimen-wx-48ad5f2a6c14` 里一条留言被 12 条回复共用，其中 11 条无关。
+    # 后果是按提问召回时拿到答非所问的内容。
+    #
+    # 连发内部**不是**互不相干：抽样看到他会连续汇报自己的动作
+    #   「我没有开仓。」→「2689时,还是0.14」→「我计划是接近0或者复数时才分批建仓。」
+    # 所以第 2 条起不能简单丢掉上下文，改为记 run_index（这是连发里的第几条）
+    # 与 run_head（这串连发的开头那条回复），让下游能把一串重新拼起来。
+    #
+    # 连发长度分布（4343 段）：1 条 3958 段、2 条 273 段、3 条 55 段…最长 12 条。
+    # 也就是说 91% 的配对本来就是对的，问题集中在剩下那 9%。
+    run_index = 0          # 当前连发串里的序号，1 表示紧跟读者留言的那条
+    run_first_order = 0    # 当前连发串首条的 order，供下游回溯上下文
     for index, entry in enumerate(entries):
         if entry["speaker"] != AUTHOR:
+            # 读者发言打断连发，重新计数
+            run_index = 0
+            run_first_order = 0
             continue
+        run_index += 1
+        order = len(replies) + 1
         question = ""
-        for prior in reversed(entries[:index]):
-            if prior["speaker"] != AUTHOR:
+        if run_index == 1:
+            # 紧邻的前一条若是读者留言才算提问；留言区以作者发言开头时前面没有读者
+            if index > 0 and entries[index - 1]["speaker"] != AUTHOR:
+                prior = entries[index - 1]
                 question = f"{prior['speaker']}：{prior['text']}"
-                break
-        replies.append({"question": question, "answer": entry["text"], "order": len(replies) + 1})
+            run_first_order = order
+        replies.append({
+            "question": question,
+            "answer": entry["text"],
+            "order": order,
+            "run_index": run_index,
+            # 记首条的**序号**而不是正文：正文塞进每条会被 FTS 重复索引，
+            # 实测前缀占续言块内容 33.2%，`板块` 虚增 15 块、`龙头` 一半命中只来自前缀。
+            # 首条本来就在库里且 order 相邻，用序号引用就能回溯，不必复制内容。
+            "run_first_order": run_first_order if run_index > 1 else 0,
+        })
     return replies
 
 
@@ -304,15 +337,34 @@ def chart_ocr_is_useful(text: str, *, min_chars: int = 40, min_cjk: float = 0.45
     compact = re.sub(r"\s+", "", text or "")
     if not compact:
         return False, "empty"
+    # 40 字门槛会误杀他写在图上的短判断（审查报告 P2-1 实测 33 条语句通顺的被丢），
+    # 例如「我们每天的底部是稍微有些移动的,明天的30分底部在3137点。」只有 31 字。
+    # 判据同下面的 watermark_only：有句读说明是完整句子而不是面板逐字读出的乱码。
+    # 门槛取 min_chars 的六成（40→24），低于这个长度的确实只是水印或零星数字。
     if len(compact) < min_chars:
-        return False, f"too_short({len(compact)})"
+        looks_like_prose = len(re.findall(r"[。！？；，,、?]", compact)) >= 2
+        if not (looks_like_prose and len(compact) >= min_chars * 0.6):
+            return False, f"too_short({len(compact)})"
     cjk_share = len(re.findall(f"[{CJK}]", compact)) / len(compact)
     if cjk_share < min_cjk:
         return False, f"low_cjk({cjk_share:.2f})"
-    # 水印本身不算内容：去掉水印后仍要够长
+    # 水印本身不算内容：去掉水印后仍要够长。
+    #
+    # 但门槛不能直接沿用 min_chars（审查报告 P1-7）：水印只占 6~8 字，
+    # 「38 字正文 + 6 字水印 = 44 字」过了上面第一道 min_chars，去掉水印剩 38 字，
+    # 38 < 40 就被判成"纯水印"丢掉 —— 实测命中的 12 条里 8 条是他的真实判断，
+    # 包括带点位的「短线的底,大概率会破掉3356,抄底不宜过早」。
+    #
+    # 放宽的方式是看**有没有句读**，不是单纯降数字：实测这 12 条全部落在 32~39 字，
+    # 任何低于 32 的门槛都会把噪声一起收进来。而两者的分界线很干净 ——
+    #   他写在图上的话是完整句子，标点 3~7 个
+    #   商品标签和行情面板（「方解石Calcite中国.内蒙古自治区…」）标点 0 个
     without_mark = re.sub(r"公众号[·．.]?波段之门|波段之门", "", compact)
     if len(without_mark) < min_chars:
-        return False, "watermark_only"
+        has_sentence_punct = len(re.findall(r"[。！？；，,、?]", without_mark)) >= 2
+        # 句读够多说明是他写的话，此时只要求达到 min_chars 的六成
+        if not (has_sentence_punct and len(without_mark) >= min_chars * 0.6):
+            return False, "watermark_only"
     # 行情软件面板：中文比很高（每个字都是汉字）却没有语义，光靠 cjk_share 拦不住。
     # 典型是"A股成交B股成交国债成交基金成交权证成交最新指数今日开盘昨日收盘"这种
     # 字段名连排。命中两个以上面板词且没有句读，就是面板而不是他写的话。
@@ -451,6 +503,77 @@ def extract_docx_units(path: Path) -> list[dict]:
     return units
 
 
+def update_last_import_summary(summary: dict) -> None:
+    """只改写本来源那一段的 last_import_summary 三行，不动 sources.yaml 的其余部分。
+
+    原来是 `yaml.safe_dump(config)` 整文件重写，后果（CLAUDE.md 记为 P0）：
+      1. **22 行注释全部消失** —— 那是 AGENTS.md 引用的项目规范，不是可选装饰；
+         `generic_supported_extensions` 也会从行内数组变成多行列表。
+      2. **并行会话时互相抹掉对方的登记** —— 实测有人恢复格式时又抹掉了别人刚加的
+         `kongkonglong` 整段和 `nanjinglu_bian` 的 4 个新字段。
+
+    做法是文本级替换：定位 `- id: boduanzhimen` 那一段里的 `last_import_summary:`，
+    只替换紧随其后的缩进子行。找不到锚点就抛错，不静默跳过 ——
+    静默跳过会让 sources.yaml 里的数字长期停在旧值上，后续脚本会被假数字骗到。
+    """
+    original = CONFIG.read_text(encoding="utf-8")
+    lines = original.splitlines()
+
+    # 1) 找到本来源块的行区间
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip() == f"- id: {SOURCE_ID}":
+            start = index
+            break
+    if start is None:
+        raise SystemExit(f"sources.yaml 里找不到 `- id: {SOURCE_ID}`，拒绝写入")
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].lstrip().startswith("- id:"):
+            end = index
+            break
+
+    # 2) 在该区间内找 last_import_summary，连同它的缩进子行一起替换
+    key_line = None
+    for index in range(start, end):
+        if lines[index].strip() == "last_import_summary:":
+            key_line = index
+            break
+    if key_line is None:
+        raise SystemExit(f"{SOURCE_ID} 段里找不到 last_import_summary，拒绝写入")
+    key_indent = len(lines[key_line]) - len(lines[key_line].lstrip())
+    tail = key_line + 1
+    while tail < end:
+        stripped = lines[tail].strip()
+        # 空行或缩进比 key 更深的行都属于这个映射
+        if stripped and (len(lines[tail]) - len(lines[tail].lstrip())) <= key_indent:
+            break
+        tail += 1
+
+    child_indent = " " * (key_indent + 2)
+    replacement = [lines[key_line]]
+    replacement += [f"{child_indent}{name}: {summary[name]}"
+                    for name in ("documents", "chunks", "errors")]
+    updated = lines[:key_line] + replacement + lines[tail:]
+
+    text = "\n".join(updated) + "\n"
+    # 校验：改完必须仍是合法 YAML，且除这三个数字外没有别的字段被动到
+    reparsed = yaml.safe_load(text)
+    entry = next(item for item in reparsed["sources"] if item["id"] == SOURCE_ID)
+    if entry["last_import_summary"] != summary:
+        raise SystemExit(f"写入校验失败：期望 {summary}，实际 {entry['last_import_summary']}")
+    before = yaml.safe_load(original)
+    for item_before, item_after in zip(before["sources"], reparsed["sources"]):
+        keys_before = set(item_before) - {"last_import_summary"}
+        keys_after = set(item_after) - {"last_import_summary"}
+        if keys_before != keys_after:
+            raise SystemExit(f"写入校验失败：{item_before.get('id')} 的字段集变了")
+
+    temporary = CONFIG.with_suffix(".yaml.tmp")
+    write_text_lf(temporary, text)
+    temporary.replace(CONFIG)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=0, help="只处理前 N 篇公众号文章，0 为全部（调试用）")
@@ -549,7 +672,20 @@ def main() -> int:
                 }
             )
         for reply in replies:
-            text = f"读者问：{reply['question']}\n作者答：{reply['answer']}" if reply["question"] else f"作者留言：{reply['answer']}"
+            # 三种形态，对应留言区的三种真实情形（审查报告 P1-6）：
+            #   1. 紧跟读者留言 → 读者问 / 作者答
+            #   2. 连发的第 2 条起 → 作者续言，带上这串开头供还原上下文，
+            #      **不冒充问答** —— 它回答的不是那条读者留言
+            #   3. 留言区以他自己开头 → 作者留言
+            if reply["question"]:
+                text = f"读者问：{reply['question']}\n作者答：{reply['answer']}"
+            elif reply.get("run_first_order"):
+                # 只写首条的序号，不复制它的正文 —— 复制会被 FTS 重复索引
+                # （实测前缀占续言块内容 33.2%，`板块` 虚增 15 块）。
+                text = (f"作者续言（承接本篇第{reply['run_first_order']}条，"
+                        f"同一串第{reply['run_index']}条）：{reply['answer']}")
+            else:
+                text = f"作者留言：{reply['answer']}"
             units.append(
                 {
                     "locator": f"留言区第{reply['order']}条作者回复",
@@ -895,9 +1031,7 @@ def main() -> int:
     if args.out_dir:
         print(f"[--out-dir] 产物写到 {lib}，未改写 {CONFIG.name}")
     else:
-        temporary = CONFIG.with_suffix(".yaml.tmp")
-        write_text_lf(temporary, yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
-        temporary.replace(CONFIG)
+        update_last_import_summary(source["last_import_summary"])
     write_text_lf(lib / "source.yaml", yaml.safe_dump(source, allow_unicode=True, sort_keys=False))
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))

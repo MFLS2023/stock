@@ -38,6 +38,21 @@ SOURCE_ROOT = ROOT / "郁金香花园付费文章文档版"
 LIB = ROOT / "_知识库系统" / "source_libraries" / SOURCE_ID
 CONVERTER = Path(__file__).with_name("convert_doc_to_docx.ps1")
 
+# Screenshots below this width are enlarged before OCR. Windows OCR resolves dense
+# Chinese glyphs by pixel size, not by how legible the image looks to a human, so a
+# narrow screenshot loses strokes that a wider copy of the same picture keeps.
+#
+# Unlike the nanjinglu source — where this same change moved narrow pages from 57%
+# to 89% in-vocabulary characters — the gain here is small, because these images are
+# already 1080px wide at the median. Measured on 42 sampled images across three width
+# bands: 93.4% -> 94.8% overall, with the widest gain on the <800px band
+# (88.2% -> 89.9%, and 812 -> 956 characters read). Kept because the cost is one
+# resize per cached image, but it is an optimisation rather than a repair.
+OCR_TARGET_WIDTH = 2000
+# Bumped when the OCR input changes shape, so existing per-image caches are recomputed
+# rather than silently mixing pre- and post-upscale text.
+OCR_CACHE_VERSION = 2
+
 NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -239,9 +254,36 @@ def group_external_images() -> list[dict]:
     return sorted(result, key=lambda item: natural_key(item["key"]))
 
 
+def upscale_for_ocr(path: Path, work: Path) -> tuple[Path, int]:
+    """Return an OCR-ready copy of an image, widened to OCR_TARGET_WIDTH if narrower.
+
+    Returns the original path unchanged when no resize is needed, so wide images cost
+    nothing. A failure to decode is not fatal: the original is handed to OCR, which
+    records its own error for that image.
+    """
+    from PIL import Image
+
+    try:
+        with Image.open(path) as opened:
+            width, height = opened.size
+            if width >= OCR_TARGET_WIDTH:
+                return path, 0
+            ratio = OCR_TARGET_WIDTH / width
+            work.mkdir(parents=True, exist_ok=True)
+            target = work / f"{sha256_file(path)[:16]}.png"
+            if not target.exists():
+                opened.convert("RGB").resize(
+                    (OCR_TARGET_WIDTH, max(1, round(height * ratio))), Image.LANCZOS
+                ).save(target, format="PNG")
+            return target, OCR_TARGET_WIDTH
+    except Exception:
+        return path, 0
+
+
 def cache_ocr(items: list[tuple[str, Path]], force: bool) -> tuple[dict[str, dict], list[dict]]:
     cache_dir = LIB / "image_ocr_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    work_dir = ROOT / "_知识库系统" / "tmp" / "tulip-upscaled"
     results: dict[str, dict] = {}
     missing: list[tuple[str, Path]] = []
     key_hashes: dict[str, str] = {}
@@ -252,7 +294,12 @@ def cache_ocr(items: list[tuple[str, Path]], force: bool) -> tuple[dict[str, dic
         if not force and cache_path.exists():
             try:
                 item = json.loads(cache_path.read_text(encoding="utf-8"))
-                if item.get("source_hash") == digest:
+                # The version check is what makes the upscale take effect: caches
+                # written before it carry text OCRed from the un-enlarged image.
+                if (
+                    item.get("source_hash") == digest
+                    and item.get("ocr_cache_version") == OCR_CACHE_VERSION
+                ):
                     results[key] = item
                     continue
             except (OSError, json.JSONDecodeError):
@@ -260,11 +307,20 @@ def cache_ocr(items: list[tuple[str, Path]], force: bool) -> tuple[dict[str, dic
         missing.append((key, path))
     errors: list[dict] = []
     if missing:
-        fresh = ocr_images(missing, batch_size=20)
+        # OCR reads the enlarged copy; the cache still records the original path so the
+        # citation and any re-check point at the real asset, not a temporary file.
+        prepared: list[tuple[str, Path]] = []
+        scaled: dict[str, int] = {}
+        for key, path in missing:
+            ocr_path, scaled_to = upscale_for_ocr(path, work_dir)
+            prepared.append((key, ocr_path))
+            scaled[key] = scaled_to
+        fresh = ocr_images(prepared, batch_size=20)
         for key, path in missing:
             raw = fresh.get(key, {"text": "", "error": "no_result", "tiles": 0})
             item = {
                 "source_hash": key_hashes[key], "source_path": str(path),
+                "ocr_cache_version": OCR_CACHE_VERSION, "scaled_to": scaled[key],
                 "text": clean_text(raw.get("text", ""), ocr=True), "error": raw.get("error", ""),
                 "tiles": raw.get("tiles", 0),
             }

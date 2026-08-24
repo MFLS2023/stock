@@ -1,5 +1,6 @@
 {
   "source_hash": "da4cc2f1d3c6877447e34bd07b2d8b68f0b04b80131df9ec207744d5b95f7ba4",
+  "cache_version": 4,
   "dpi": 140,
   "page": 5,
   "method": "embedded",
@@ -8,9 +9,11 @@
   "ocr_residue": "",
   "ocr_residue_chars": 0,
   "embedded_chars": 350,
-  "ocr_chars": 351,
+  "ocr_chars": 0,
   "embedded_cjk_ratio": 0.894,
-  "ocr_cjk_ratio": 0.895,
+  "ocr_cjk_ratio": 0.0,
   "ocr_error": "",
-  "ocr_tiles": 1
+  "ocr_tiles": 0,
+  "page_images": 0,
+  "embedded_usable": true
 }

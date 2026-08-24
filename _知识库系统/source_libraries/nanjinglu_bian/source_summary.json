@@ -1,17 +1,24 @@
 {
-  "generated_at": "2026-08-02T11:19:43.570414+00:00",
+  "generated_at": "2026-08-09T08:54:28.835928+00:00",
   "source_id": "nanjinglu_bian",
-  "files": 42,
-  "documents": 42,
-  "unique_documents": 41,
+  "files": 43,
+  "documents": 43,
+  "unique_documents": 42,
   "duplicates": 1,
-  "parents": 80,
-  "chunks": 525,
-  "characters": 203772,
+  "parents": 95,
+  "chunks": 586,
+  "characters": 241927,
   "extraction_counts": {
-    "embedded": 232,
-    "ocr_screenshot": 179,
-    "ocr": 79
+    "embedded": 246,
+    "ocr_screenshot": 198,
+    "ocr": 77
   },
-  "errors": []
+  "errors": [
+    {
+      "document_id": "nanjinglu-bef86704bc0a",
+      "page": 3,
+      "stage": "page_image",
+      "error": "page_images_failed: image file is truncated (29 bytes not processed)"
+    }
+  ]
 }

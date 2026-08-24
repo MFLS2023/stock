@@ -20,12 +20,14 @@ description: Teach trading concepts from the user's local multi-source corpus wi
 5. Cite as `[来源｜作者或嘉宾｜文档｜日期｜定位]`.
 6. Distinguish historical opinions from verifiable facts. Use `$market-evidence-verifier` for current applicability.
 7. If the requested source is not yet integrated or no evidence is found, say so directly and do not reconstruct the author's view from general knowledge.
-8. After explaining a concept, offer to generate a method card draft. If the user confirms, write to `_知识库系统/methods.jsonl` with these fields:
+8. **方法卡是可选副产品（2026-08-23 方向校准），默认不主动提议。** 只有用户明确说「帮我记下来 / 做成卡」时才生成，写入 `_知识库系统/methods.jsonl` with these fields:
    - `core_claim`: one-sentence executable statement
    - `conditions`: required market setup
    - `invalidation`: when the method fails
    - `source_quote`: verbatim excerpt with locator
    - `status`: always `draft` until the user explicitly approves
    - `created`: today's date
+   - 注意：`status=draft` 的卡**不进检索索引**；审批走 `reports\方法卡审批清单.md`
+     （用户逐张填 认/改/拒）→ `scripts\apply_method_review.py` 回写后才进索引
 
 Avoid deterministic trade instructions and return calculations only when produced from source data or code.

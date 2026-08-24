@@ -1,5 +1,6 @@
 {
   "source_hash": "edc5635d51faf75f1303fc0dc475a701449764c2d7c1d7e06638ba914eaf4b2c",
+  "cache_version": 4,
   "dpi": 140,
   "page": 3,
   "method": "ocr",
@@ -12,5 +13,7 @@
   "embedded_cjk_ratio": 0.083,
   "ocr_cjk_ratio": 0.088,
   "ocr_error": "",
-  "ocr_tiles": 1
+  "ocr_tiles": 1,
+  "page_images": 0,
+  "embedded_usable": false
 }

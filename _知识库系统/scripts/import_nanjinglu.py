@@ -21,6 +21,7 @@ from kb_import_utils import (
     clean_text,
     clean_title,
     extract_date,
+    extract_page_images,
     infer_topics,
     meaningful_char_count,
     natural_key,
@@ -90,6 +91,15 @@ def group_units(units: list[dict], target_chars: int) -> list[list[dict]]:
     return groups
 
 
+# Bumped whenever the extraction strategy changes in a way that makes older page
+# caches wrong rather than merely stale. v2 switched screenshot OCR from whole-page
+# rendering to embedded image objects; v3 added the 1600px upscale for narrow images,
+# without which 660px screenshots came out worse than the v1 whole-page path did;
+# v4 lets the embedded images carry the prose on pages with no usable text layer,
+# where they beat the page raster on the same text.
+CACHE_VERSION = 4
+
+
 def load_cache(path: Path, source_hash: str, dpi: int) -> dict | None:
     if not path.exists():
         return None
@@ -104,6 +114,7 @@ def load_cache(path: Path, source_hash: str, dpi: int) -> dict | None:
         # Caches written before dual-layer extraction lack ocr_residue and would
         # silently drop the screenshot content, so treat them as stale.
         and "ocr_residue" in item
+        and item.get("cache_version") == CACHE_VERSION
     ):
         return item
     return None
@@ -126,6 +137,10 @@ def extract_pdf(
     reader = PdfReader(path)
     pages: list[dict | None] = [None] * len(reader.pages)
     to_ocr: list[tuple[str, Path]] = []
+    # Which OCR keys belong to a page, and whether they came from an embedded image
+    # object or from a whole-page render. The two are merged differently below.
+    page_keys: dict[int, list[str]] = {}
+    key_kind: dict[str, str] = {}
     render_work = Path(tempfile.mkdtemp(prefix=f"{doc_id}-", dir=ROOT / "_知识库系统" / "tmp"))
     errors: list[dict] = []
     try:
@@ -142,54 +157,143 @@ def extract_pdf(
                 errors.append({"document_id": doc_id, "page": index, "stage": "embedded", "error": str(exc)})
             # These PDFs mix article prose (carried by the text layer) with pasted
             # market screenshots (only reachable through OCR), so a page is not an
-            # either/or choice. Every page is rendered and OCRed; a usable text layer
-            # is kept alongside as the high-confidence copy of the prose.
+            # either/or choice — both layers are collected.
             usable = text_layer_is_usable(embedded, min_chars=threshold, min_cjk_ratio=cjk_threshold)
-            try:
-                image_path = render_work / f"page-{index:03d}.png"
-                render_pdf_page(path, index, image_path, dpi)
-                key = str(index)
-                to_ocr.append((key, image_path))
-                pages[index - 1] = {
-                    "source_hash": source_hash, "dpi": dpi, "page": index, "method": "pending_ocr",
-                    "confidence": "low", "text": embedded, "embedded_chars": meaningful_char_count(embedded),
-                    "ocr_chars": 0, "ocr_error": "", "embedded_usable": usable,
+
+            # Screenshots are OCRed from the embedded image objects at their native
+            # resolution. Rendering the page instead would upsample a 1080px-wide
+            # source and blur Chinese strokes into separate radicals — measured 3.1%
+            # junk characters this way versus 16-30% via whole-page rendering.
+            keys: list[str] = []
+            image_items = extract_page_images(page, render_work, f"page-{index:03d}")
+            image_count = 0
+            for order, item in enumerate(image_items, start=1):
+                if item.get("error"):
+                    errors.append({
+                        "document_id": doc_id, "page": index, "stage": "page_image",
+                        "error": item["error"],
+                    })
+                    continue
+                key = f"{index}:img{order}"
+                to_ocr.append((key, item["path"]))
+                key_kind[key] = "image"
+                keys.append(key)
+                image_count += 1
+
+            # A whole-page render is still required when the text layer cannot carry
+            # the prose: scanned pages have no separate image objects to fall back on,
+            # so this path stays as the only way to read them.
+            render_error = ""
+            if not usable:
+                try:
+                    image_path = render_work / f"page-{index:03d}-full.png"
+                    render_pdf_page(path, index, image_path, dpi)
+                    key = f"{index}:full"
+                    to_ocr.append((key, image_path))
+                    key_kind[key] = "full"
+                    keys.append(key)
+                except Exception as exc:
+                    render_error = str(exc)
+                    errors.append({
+                        "document_id": doc_id, "page": index, "stage": "render", "error": render_error,
+                    })
+
+            page_keys[index] = keys
+            if not keys:
+                # Nothing to OCR: either a pure-text page (fine, the text layer has it)
+                # or an unusable layer whose render failed (recorded as low confidence).
+                item = {
+                    "source_hash": source_hash, "cache_version": CACHE_VERSION, "dpi": dpi,
+                    "page": index,
+                    "method": "embedded" if usable else "embedded_fallback",
+                    "confidence": "high" if usable else "low",
+                    "text": embedded, "ocr_residue": "", "ocr_residue_chars": 0,
+                    "embedded_chars": meaningful_char_count(embedded), "ocr_chars": 0,
+                    "ocr_error": render_error, "embedded_usable": usable,
                     "embedded_cjk_ratio": round(cjk_ratio(embedded), 3),
-                }
-            except Exception as exc:
-                errors.append({"document_id": doc_id, "page": index, "stage": "render", "error": str(exc)})
-                item = pages[index - 1] or {
-                    "source_hash": source_hash, "dpi": dpi, "page": index, "method": "embedded_fallback",
-                    "confidence": "low", "text": embedded, "embedded_chars": meaningful_char_count(embedded),
-                    "ocr_chars": 0, "ocr_error": str(exc),
+                    "page_images": 0,
                 }
                 save_cache(cache_path, item)
                 pages[index - 1] = item
+                continue
+
+            pages[index - 1] = {
+                "source_hash": source_hash, "cache_version": CACHE_VERSION, "dpi": dpi,
+                "page": index, "method": "pending_ocr", "confidence": "low", "text": embedded,
+                "embedded_chars": meaningful_char_count(embedded), "ocr_chars": 0,
+                "ocr_error": render_error, "embedded_usable": usable,
+                "embedded_cjk_ratio": round(cjk_ratio(embedded), 3),
+                "page_images": image_count,
+            }
 
         if to_ocr:
             ocr_result = ocr_images(to_ocr)
-            for key, _ in to_ocr:
-                index = int(key)
+            for index, keys in page_keys.items():
                 pending = pages[index - 1] or {}
-                ocr_item = ocr_result.get(key, {"text": "", "error": "no_result", "tiles": 0})
                 embedded = pending.get("text", "")
-                ocr_text = clean_text(ocr_item.get("text", ""), ocr=True)
-                embedded_count = meaningful_char_count(embedded)
-                ocr_count = meaningful_char_count(ocr_text)
                 embedded_usable = bool(pending.get("embedded_usable"))
+
+                image_texts: list[str] = []
+                full_text = ""
+                ocr_errors: list[str] = []
+                tiles = 0
+                for key in keys:
+                    ocr_item = ocr_result.get(key, {"text": "", "error": "no_result", "tiles": 0})
+                    text = clean_text(ocr_item.get("text", ""), ocr=True)
+                    tiles += ocr_item.get("tiles", 0) or 0
+                    if ocr_item.get("error"):
+                        ocr_errors.append(f"{key}: {ocr_item['error']}")
+                        errors.append({
+                            "document_id": doc_id, "page": index, "stage": "ocr",
+                            "error": f"{key}: {ocr_item['error']}",
+                        })
+                    if not text:
+                        continue
+                    if key_kind.get(key) == "image":
+                        image_texts.append(text)
+                    else:
+                        full_text = text
+
+                screenshot_text = "\n".join(image_texts)
                 if embedded_usable:
-                    # Keep the clean text layer for the prose and only the OCR lines it
-                    # does not already cover, which is the screenshot content.
-                    residue = subtract_known_text(ocr_text, embedded)
+                    # The text layer carries the prose; the embedded images carry the
+                    # screenshots. They came from different objects, so no n-gram
+                    # subtraction is needed — that pass only existed to undo the
+                    # overlap created by rendering both together.
+                    residue = screenshot_text
                     method, confidence, primary = "embedded", "high", embedded
                 else:
-                    # Nothing trustworthy in the text layer, so OCR carries the page.
-                    residue = ""
-                    method, confidence, primary = "ocr", "medium", ocr_text
-                    if not ocr_text:
+                    # No trustworthy text layer, so OCR carries the prose. Two candidates
+                    # exist and the better one wins rather than the whole-page render
+                    # winning by default: on these pages the article body is itself inside
+                    # a pasted image, so the embedded object at 1600px is often a cleaner
+                    # read of the same text than the 140-DPI page raster (measured on six
+                    # such pages: 89.1% -> 94.5% in-vocabulary, 1215 -> 1364 characters).
+                    #
+                    # "Better" needs both more signal and no loss of content: a render
+                    # that read twice as much text is more trustworthy than a slightly
+                    # cleaner fragment, so the image layer must be within 10% of the
+                    # render's length before its cleanliness counts.
+                    full_chars = meaningful_char_count(full_text)
+                    image_chars = meaningful_char_count(screenshot_text)
+                    prefer_images = bool(screenshot_text) and (
+                        not full_text or image_chars >= full_chars * 0.9
+                    )
+                    if prefer_images:
+                        method, confidence, primary = "ocr", "medium", screenshot_text
+                        # Whatever the render saw beyond the images is still worth keeping.
+                        residue = subtract_known_text(full_text, screenshot_text) if full_text else ""
+                    elif full_text:
+                        method, confidence, primary = "ocr", "medium", full_text
+                        residue = subtract_known_text(screenshot_text, full_text)
+                    else:
                         method, confidence, primary = "embedded_fallback", "low", embedded
+                        residue = ""
+
+                ocr_text_all = "\n".join(filter(None, [full_text, screenshot_text]))
                 item = {
                     "source_hash": source_hash,
+                    "cache_version": CACHE_VERSION,
                     "dpi": dpi,
                     "page": index,
                     "method": method,
@@ -197,17 +301,15 @@ def extract_pdf(
                     "text": primary,
                     "ocr_residue": residue,
                     "ocr_residue_chars": meaningful_char_count(residue),
-                    "embedded_chars": embedded_count,
-                    "ocr_chars": ocr_count,
+                    "embedded_chars": meaningful_char_count(embedded),
+                    "ocr_chars": meaningful_char_count(ocr_text_all),
                     "embedded_cjk_ratio": round(cjk_ratio(embedded), 3),
-                    "ocr_cjk_ratio": round(cjk_ratio(ocr_text), 3),
-                    "ocr_error": ocr_item.get("error", ""),
-                    "ocr_tiles": ocr_item.get("tiles", 0),
+                    "ocr_cjk_ratio": round(cjk_ratio(ocr_text_all), 3),
+                    "ocr_error": "；".join(ocr_errors),
+                    "ocr_tiles": tiles,
+                    "page_images": pending.get("page_images", 0),
+                    "embedded_usable": embedded_usable,
                 }
-                if ocr_item.get("error"):
-                    errors.append({
-                        "document_id": doc_id, "page": index, "stage": "ocr", "error": ocr_item["error"]
-                    })
                 save_cache(LIB / "page_texts" / f"{doc_id}-page-{index:03d}.json", item)
                 pages[index - 1] = item
     finally:
@@ -223,8 +325,13 @@ def extract_image(path: Path, doc_id: str, source_hash: str, *, force: bool) -> 
     result = ocr_images([("1", path)]).get("1", {"text": "", "error": "no_result", "tiles": 0})
     text = clean_text(result.get("text", ""), ocr=True)
     item = {
-        "source_hash": source_hash, "dpi": 0, "page": 1, "method": "ocr",
+        "source_hash": source_hash, "cache_version": CACHE_VERSION, "dpi": 0, "page": 1,
+        "method": "ocr",
         "confidence": "medium" if text else "low", "text": text, "embedded_chars": 0,
+        # A standalone JPG has no text layer to separate from, so there is no residue.
+        # The key must still be present: load_cache() treats its absence as a stale
+        # pre-dual-layer cache and would re-OCR every image on every run.
+        "ocr_residue": "", "ocr_residue_chars": 0,
         "ocr_chars": meaningful_char_count(text), "ocr_error": result.get("error", ""),
         "ocr_tiles": result.get("tiles", 0), "image_name": path.name,
     }
