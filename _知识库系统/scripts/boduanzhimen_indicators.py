@@ -405,7 +405,12 @@ def select_ma_climb(frame: pd.DataFrame, code: str = "") -> pd.Series:
     return condition.fillna(False)
 
 
-def select_sector_strong(frame: pd.DataFrame, ref_date_close: float | None = None) -> pd.Series:
+def select_sector_strong(
+    frame: pd.DataFrame,
+    ref_date_close: float | None = None,
+    *,
+    allow_missing_ref: bool = False,
+) -> pd.Series:
     """板块内强势股（《如何挑选某一板块里的强势股（医药为例）》）。
 
         M55:=MA(C,55);
@@ -415,16 +420,29 @@ def select_sector_strong(frame: pd.DataFrame, ref_date_close: float | None = Non
 
     REFDATE(C,1241008) 取的是 2024-10-08 那天的收盘价（通达信的 REFDATE 用
     YYMMDD 或带前缀的日期数；1241008 即 2024-10-08）——那是他反复提到的一个
-    关键高点日。这个日期硬编码在公式里，换时间用需要换基准，所以这里做成参数：
-    ref_date_close 不传时退化为不检查该条件，并在返回的 attrs 里标注。
+    关键高点日。
+
+    ⚠️ 缺基准价不再静默降级（2026-08-24 修，《待处理》P1-3）：ref_date_close
+    不传时本函数直接抛 ValueError——没有那个条件就不是他的公式，实测信号会
+    多约 4 倍。此前退化只写进返回值的 attrs，而 attrs 在 Series 被 bool() 或
+    进 DataFrame 后就丢了，等于无声换公式。确要跑无基准版必须显式传
+    allow_missing_ref=True，attrs 里仍会标注。
     """
+    if ref_date_close is None and not allow_missing_ref:
+        raise ValueError(
+            "select_sector_strong 需要基准日收盘价：原公式硬编码 "
+            "REFDATE(C,1241008)=2024-10-08 收盘价，请传 ref_date_close=<该日收盘>。"
+            "若明确要跑无基准的弱化版（不是他的公式，信号约多 4 倍），"
+            "传 allow_missing_ref=True。"
+        )
     close, high = frame["close"], frame["high"]
     ma55, ma13 = ma(close, 55), ma(close, 13)
     condition = (close > ma55) & (ma13 > ma55) & (close > hhv(high, 77) * 0.8)
-    if ref_date_close is not None:
+    applied = ref_date_close is not None
+    if applied:
         condition = condition & (close > ref_date_close)
     result = condition.fillna(False)
-    result.attrs["ref_date_applied"] = ref_date_close is not None
+    result.attrs["ref_date_applied"] = applied
     result.attrs["ref_date_note"] = "原公式硬编码 REFDATE(C,1241008)=2024-10-08 收盘价"
     return result
 

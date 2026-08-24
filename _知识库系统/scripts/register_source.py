@@ -147,10 +147,19 @@ def main() -> int:
         print(json.dumps(preview, ensure_ascii=False, indent=2))
         return 0
 
-    config.setdefault("sources", []).append(source)
-    temporary = CONFIG.with_suffix(".yaml.tmp")
-    write_text_lf(temporary, yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
-    temporary.replace(CONFIG)
+    # 不再自动回写 config/sources.yaml（2026-08-24）：yaml.safe_dump 整文件序列化
+    # 会抹掉全部手写注释，并行注册时还会互相抹掉对方刚加的来源——实测踩过两次，
+    # kongkonglong 整段和 nanjinglu_bian 的 4 个新字段都这么丢过。改为打印可直接
+    # 粘贴的登记块，由人手动追加到 sources.yaml 的 sources: 末尾。validate_kb 对
+    # 未写 last_import_summary 的来源不做断言，所以这样不会造成校验失败。
+    block = yaml.safe_dump(source, allow_unicode=True, sort_keys=False)
+    pasted = "\n".join(
+        ("- " + line.rstrip()) if i == 0 else ("  " + line)
+        for i, line in enumerate(block.splitlines())
+    )
+    print("已创建库目录与预检报告。请把下面这块手动追加到 config/sources.yaml 的")
+    print("sources: 列表末尾（本脚本不再替你写，防止抹注释和并发覆盖）：\n")
+    print(pasted)
     library = LIBRARIES / source_id
     library.mkdir(parents=True, exist_ok=True)
     write_text_lf(library / "source.yaml", yaml.safe_dump(source, allow_unicode=True, sort_keys=False))

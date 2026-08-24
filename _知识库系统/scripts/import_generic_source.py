@@ -293,9 +293,17 @@ def main() -> int:
         "documents": len(documents), "chunks": len(chunks), "errors": len(errors),
         "unsupported": len(unsupported),
     }
-    temporary_config = CONFIG.with_suffix(".yaml.tmp")
-    write_text_lf(temporary_config, yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
-    temporary_config.replace(CONFIG)
+    # 不再整文件回写全局登记表（2026-08-24，同 register_source 的修复理由：
+    # safe_dump 抹注释 + 并发互相覆盖）。改为打印应核对/手改进 sources.yaml
+    # 本来源段落的字段。validate_kb 只对显式登记了 last_import_summary.chunks
+    # 的来源做一致性断言，不登记不算错。
+    print("如需更新全局登记表，请把以下字段核进 config/sources.yaml 的 "
+          f"{source['id']} 段落（本脚本不再自动回写）：")
+    print(yaml.safe_dump(
+        {"status": updated_source["status"],
+         "last_import_summary": source["last_import_summary"]},
+        allow_unicode=True, sort_keys=False,
+    ))
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not errors and not unsupported else 1
 
