@@ -4,7 +4,10 @@
 import io
 import sys
 import time
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# 只在直接运行时重包 stdout：模块级执行会在 unittest discover 导入本文件时
+# 替换并最终关闭原 stdout，害得套件里后面 print 的测试报 I/O closed（实测踩过）
+if __name__ == "__main__":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 import live_market_kaipanla as kpl
 

@@ -12,7 +12,7 @@
     "3. 跑 `python _知识库系统/scripts/refresh_regression_baseline.py`（不带参数就是对账模式，列出差异；此前这里写的 --check 是个不存在的参数，会报 unrecognized arguments）",
     "4. 确认无误后跑同一脚本加 `--write` 写入，然后连同 history 一起提交"
   ],
-  "baseline_time": "2026-08-09",
+  "baseline_time": "2026-08-24",
   "sources": [
     "fulibei",
     "nanjinglu_bian",
@@ -22,12 +22,12 @@
     "chunks": {
       "fulibei": 1470,
       "nanjinglu_bian": 586,
-      "tulip_garden": 1181
+      "tulip_garden": 1213
     },
     "parents": {
       "fulibei": 441,
       "nanjinglu_bian": 95,
-      "tulip_garden": 155
+      "tulip_garden": 161
     },
     "documents": {
       "fulibei": 110,
@@ -36,17 +36,17 @@
     }
   },
   "prose_matches": {
-    "竞价": 393,
-    "筹码": 370,
-    "龙头": 613,
-    "打板": 186,
-    "情绪": 877
+    "竞价": 417,
+    "筹码": 373,
+    "龙头": 612,
+    "打板": 187,
+    "情绪": 911
   },
   "title_only_extra": {
-    "竞价": 58,
-    "筹码": 48,
+    "竞价": 56,
+    "筹码": 50,
     "龙头": 310,
-    "情绪": 418
+    "情绪": 424
   },
   "recall_union": {
     "情绪周期": 517,
@@ -54,7 +54,7 @@
     "弱转强": 119,
     "筹码断层": 52
   },
-  "topics_filled": 3237,
+  "topics_filled": 3269,
   "history": [
     {
       "date": "2026-08-02",
@@ -91,6 +91,15 @@
         "tulip_garden": 1181
       },
       "why": "南京路彼岸**整源重跑了双路抽取**(不是又加文章)。判据: documents 仍是 43 篇、新增文档只有 1 篇(《风起云涌》), 但**43 篇里几乎每篇的字符数都变了**, 有涨有跌 —— 情绪周期下\"如何选股\" 26104→36675(+40%)、熟悉的味 14934→26697(+79%), 而 情绪周期在产业趋势投资中的应用 反而 30490→24237(-20%)。三类块全增: article/high 238→252、article/medium 101→107、screenshot_ocr/low **186→227(字符 58616→99736, +70%)**, 该来源总字符 228602→284193(+24%)。增幅集中在 screenshot_ocr 说明这次重跑让 OCR 认出了更多截图内容。\n\n⚠️ **这解释了为什么有几个词的命中数是下降的**(情绪 896→877、龙头 630→613、情绪周期 519→517): 双路抽取重跑后同一页的文本层/OCR 切块边界变了, 高频词在\"块级别\"的分布随之改变 —— 词的总出现次数没少(情绪 482 次 / 龙头 488 次), 是承载它们的块数变了。**命中块数下降不等于内容丢失**, 这一点在对账时必须区分, 否则会误判为污染。\n\n这次变动不是本轮接入第 7 个来源(kongkonglong)造成的: 用改动前的索引备份 knowledge.db.backup-before-cols 跑同一套测试, 失败项完全相同(11 项), 说明基线在 kongkonglong 接入前就已被打破。kongkonglong 不在 sources 样本里(样本只有 fulibei/nanjinglu_bian/tulip_garden), 本身不影响这些数字。同期给 chunks 表加了 extraction_method / date_precision 两列, 已验证 FTS 三字段与 chunks 逐块一致(18920 块比对, 0 处错位), 不影响任何计数。"
+    },
+    {
+      "date": "2026-08-24",
+      "chunks": {
+        "fulibei": 1470,
+        "nanjinglu_bian": 586,
+        "tulip_garden": 1213
+      },
+      "why": "郁金香花园 2026-08-09 的截图 OCR 放大重跑(OCR_TARGET_WIDTH=2000, OCR_CACHE_VERSION=2)落定后基线一直没写入, 主套件红了 15 天。变化全部在 tulip_garden: chunks 1181→1213 / parents 155→161, 五个 prose 词四涨一平一跌(情绪 877→911、竞价 393→417、筹码 370→373、打板 186→187、龙头 613→612), topics_filled 3237→3269。性质与南京路 08-09 那次相同: 放大让 OCR 认出更多字, 切块边界随之改变 —— 龙头微降 1 是块级分布变化, 不是内容丢失(CLAUDE.md 已有同类案例记录)。fulibei / nanjinglu_bian 一字未动, 与 CLAUDE.md 记载一致。本次写入是《待处理-数据漂移与冻结样本破坏-20260809》开放项第 1 条的闭环, 由 2026-08-24 全面修复轮执行; 写入前已备份 knowledge.db 到 indexes/backups/knowledge-20260824.db。"
     }
   ]
 }
