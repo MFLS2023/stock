@@ -280,7 +280,9 @@ FIELD_CAPS = {"text": 8, "title": 3, "author": 2, "topics": 3}
 
 # 块类型加成。人工整理的方法卡和冲突卡比原始转录更值得先看。阶段 2 就有这两条，
 # 数值原样保留：它与字段权重方向无关，本阶段不借机改。
-CHUNK_TYPE_BONUS = {"curated_method": 5.0, "conflict": 2.0}
+# chitchat（2026-08-24）：复利杯寒暄/闲聊段（mark_fulibei_chitchat.py 人工核对后标记，
+# 共 22 块），仍可检索但在字段层扣 3 分——实测「龙头」top1 曾是「姐姐别做运动了」。
+CHUNK_TYPE_BONUS = {"curated_method": 5.0, "conflict": 2.0, "chitchat": -3.0}
 
 
 # 两套折叠口径的名字。选哪套**由词长决定**（fold_kind_for()），不由内容决定——

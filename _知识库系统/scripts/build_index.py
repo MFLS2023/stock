@@ -177,6 +177,8 @@ KNOWN_CHUNK_TYPES = frozenset({
     "article", "article_body", "paid_article", "daily_review", "daily_data",
     "weekend_essay", "transcript", "feishu_chat", "course_text", "method_article",
     "market_commentary", "indicator_formula",
+    # 复利杯闲聊段（2026-08-24 标记，mark_fulibei_chitchat.py；可检索但排序降权）
+    "chitchat",
     # 留言区与问答
     "author_reply", "qa_reply",
     # OCR 类（数字不可信，引用前回看原页）
