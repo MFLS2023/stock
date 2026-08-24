@@ -1,16 +1,16 @@
 {
-  "generated_at": "2026-08-09T08:54:28.835928+00:00",
+  "generated_at": "2026-08-24T12:28:18.409402+00:00",
   "source_id": "nanjinglu_bian",
   "files": 43,
   "documents": 43,
   "unique_documents": 42,
   "duplicates": 1,
-  "parents": 95,
-  "chunks": 586,
-  "characters": 241927,
+  "parents": 94,
+  "chunks": 584,
+  "characters": 249257,
   "extraction_counts": {
     "embedded": 246,
-    "ocr_screenshot": 198,
+    "ocr_screenshot": 199,
     "ocr": 77
   },
   "errors": [

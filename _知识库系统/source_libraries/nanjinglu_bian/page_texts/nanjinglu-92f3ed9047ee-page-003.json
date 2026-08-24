@@ -1,6 +1,6 @@
 {
   "source_hash": "92f3ed9047eed29f2b7abcac9359177bee1019971e0930b933cb5cc08362da44",
-  "cache_version": 4,
+  "cache_version": 8,
   "dpi": 140,
   "page": 3,
   "method": "embedded",
@@ -10,10 +10,8 @@
   "ocr_residue_chars": 0,
   "embedded_chars": 652,
   "ocr_chars": 0,
-  "embedded_cjk_ratio": 0.877,
-  "ocr_cjk_ratio": 0.0,
   "ocr_error": "",
-  "ocr_tiles": 0,
-  "page_images": 0,
-  "embedded_usable": true
+  "embedded_usable": true,
+  "embedded_cjk_ratio": 0.877,
+  "page_images": 0
 }

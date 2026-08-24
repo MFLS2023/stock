@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-rps_local.py —— 直接读通达信本地文件算三线红名单。
+rps_local.py —— 直接读通达信本地文件算三线红名单（MCP 侧入口）。
 
 不需要写选股公式，不需要手工导出，不需要点菜单。两个输入都已经在本机：
 
@@ -8,7 +8,17 @@ rps_local.py —— 直接读通达信本地文件算三线红名单。
         编号 1=120日  2=250日  3=50日（与作者一致；本机 4/5 与作者次序相反，三线红不用）
   日线  C:\\new_tdx\\vipdoc\\{sh,sz,bj}\\lday\\<市场><代码>.day
 
-产出格式与 rps_pool.parse_export() 完全一致，直接喂 rps_pool.save_daily()，
+⚠️ 算法不在本文件里，在 CORE_DIR 指向的那套（南京路彼岸\\RPS每日自动更新）。
+   本文件只做「MCP 参数 → 权威实现 → MCP 返回格式」的转接。
+
+   为什么：本文件早期自带一套 HHV(150) 不复权的实现，与每天双击 bat 那套
+   并行存在，两套写进同一个名单目录。实测同一天（2026-08-21）
+   本地口径算 16 只、权威口径算 19 只 —— 两个方向都错：
+     窗口 150 比 250 短，HHV 偏小、比值偏大  → 多选
+     不复权，除权股的历史高点虚高、比值偏小  → 漏选（这一项在 08-21 占了上风）
+   同一个算法维护两份，修好一次还会再分叉一次，所以删掉本地实现改为委托。
+
+产出格式与 rps_pool.parse_export() 一致，直接喂 rps_pool.save_daily()，
 下游（stat / diff / 7指标 / MCP 工具）一行都不用改。
 
 ⚠️ 已验证与未验证的部分见文件末尾「验证记录」。板块三线红（编号 7-11）本机没装，
@@ -58,9 +68,12 @@ PRESETS = {
 }
 DEFAULT_PRESET = "fine"
 
-# JJXG:=H/HHV(HIGH,N)>0.85 —— 作者公式里的近高点约束
-HHV_N = 150
-HHV_RATIO = 0.85
+# 权威实现所在目录。三线红的口径以那套为准 —— 它与通达信选股结果 1:1 对账过 26/26。
+CORE_DIR = (r"C:\Users\20577\Documents\炒股\知识库"
+            r"\南京路彼岸\RPS每日自动更新")
+
+# 只有 fine 口径能写进共享名单目录。见 _require_shared_preset()。
+SHARED_PRESET = "fine"
 
 # 日线记录 32 字节定长：日期 开 高 低 收（都是价×100 的整数）成交额(float) 成交量 保留
 LDAY_FMT = "<IIIIIfII"
@@ -68,6 +81,47 @@ LDAY_SIZE = struct.calcsize(LDAY_FMT)   # 32
 
 _IDX_SIZE = 29                          # 扩展数据索引记录长度
 _DAT_SIZE = 12                          # 扩展数据条目长度：日期 int32 + 零 int32 + 值 float32
+
+
+# ---------- 加载权威实现 ----------
+
+_CORE = None
+
+
+def core():
+    """返回 (rps_core, rps_adjust, rps_backfill, rps_meta) 四个权威模块
+
+    延迟导入：MCP 启动时 import rps_local 不该顺带读 400 MB 扩展数据，
+    也不该因为那个目录被挪走就整个 MCP 起不来。
+    """
+    global _CORE
+    if _CORE is not None:
+        return _CORE
+    if not os.path.isdir(CORE_DIR):
+        raise FileNotFoundError(
+            f"找不到权威实现目录：{CORE_DIR}\n"
+            "三线红的算法在那里（与通达信选股对账过），本文件只做转接。\n"
+            "如果那套挪了位置，改本文件的 CORE_DIR。")
+    if CORE_DIR not in sys.path:
+        sys.path.insert(0, CORE_DIR)
+    import rps_core, rps_adjust, rps_backfill, rps_meta   # noqa: E401
+    _CORE = (rps_core, rps_adjust, rps_backfill, rps_meta)
+    return _CORE
+
+
+def _require_shared_preset(preset: str, what: str) -> None:
+    """写共享名单目录前挡一道：非 fine 口径不许落盘
+
+    data/rps_pool_daily 里 494 天全是 fine 口径，rps_pool.csv 的「阈值口径」
+    列也这么写着。混进一天 base/oneil 的名单，下游按日累计的
+    「入总天数 / 连续天数 / 换手率」全部失真，而且事后看不出是哪天混的。
+    探索别的阈值用 calc()，它不写盘。
+    """
+    if preset != SHARED_PRESET:
+        raise ValueError(
+            f"{what} 只接受 preset={SHARED_PRESET!r}（与已落盘的 494 天一致），"
+            f"收到 {preset!r}。\n"
+            f"想看别的阈值算出来什么，用 calc(preset={preset!r}) —— 它只返回不写盘。")
 
 
 # ---------- 定位通达信 ----------
@@ -209,28 +263,44 @@ def read_lday(path: str) -> np.ndarray:
     return arr
 
 
-def hhv_ratio_at(arr: np.ndarray, date_i: int, n: int = HHV_N) -> tuple[float | None, str]:
-    """
-    算 H/HHV(HIGH,N)：该日最高价 ÷ 含该日往前 N 根的最高价。
+# 这里原先有一个 hhv_ratio_at()：窗口 150、用原始价、不复权。已删除。
+# H/HHV 现在走 rps_backfill.BarCache.ratio_at()（窗口 250 + gbbq 前复权），
+# 与每天写进名单目录的那 494 天同一份代码。read_lday() 保留，只给 check_align 用。
 
-    返回 (比值, 状态)。状态取值：
-      ok            正常
-      no_bar        这只票在该日没有日线（停牌或未上市）
-      short_history 日线不足 N 根 —— 照样算，但用实际根数，并在状态里说明
-    """
-    if len(arr) == 0:
-        return None, "no_bar"
-    d = arr["date"]
-    pos = int(np.searchsorted(d, date_i))
-    if pos >= len(d) or int(d[pos]) != date_i:
-        return None, "no_bar"
-    lo = max(0, pos - n + 1)
-    win = arr["high"][lo:pos + 1]
-    hhv = float(win.max())
-    if hhv <= 0:
-        return None, "no_bar"
-    ratio = float(arr["high"][pos]) / hhv
-    return ratio, ("ok" if (pos - lo + 1) >= n else "short_history")
+
+# ---------- 日期集合与覆盖（只做统计，不参与选股） ----------
+
+def _slot_day_set(ext) -> set[int]:
+    """某槽位出现过的所有交易日。ext 是 rps_core.ExtData"""
+    arrs = [rec[1] for rec in ext.by_code.values() if len(rec[1])]
+    if not arrs:
+        return set()
+    return {int(x) for x in np.unique(np.concatenate(arrs))}
+
+
+def _common_days(slots: dict) -> list[int]:
+    """三个槽位共有的交易日，升序"""
+    common = None
+    for ext in slots.values():
+        s = _slot_day_set(ext)
+        common = s if common is None else (common & s)
+    return sorted(common or [])
+
+
+def _coverage(slots: dict, date_i: int) -> tuple[dict, int]:
+    """该日各周期有数的票数，以及三周期都齐的票数"""
+    present = {}
+    for period, ext in slots.items():
+        s = set()
+        for code, rec in ext.by_code.items():
+            d = rec[1]
+            if len(d):
+                pos = int(np.searchsorted(d, date_i))
+                if pos < len(d) and int(d[pos]) == date_i:
+                    s.add(code)
+        present[period] = s
+    both = set.intersection(*present.values()) if present else set()
+    return {p: len(s) for p, s in present.items()}, len(both)
 
 
 # ---------- 三线红 ----------

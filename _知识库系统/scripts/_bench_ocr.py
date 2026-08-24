@@ -110,12 +110,51 @@ def run_paddle(images: list[Path]) -> dict[str, str]:
     return json.loads(payload)
 
 
+def run_rapid(images: list[Path]) -> dict[str, str]:
+    """在系统 Python 里跑 RapidOCR（rapidocr_onnxruntime，模型随包自带、不联网）。"""
+    import os
+
+    script = WORK / "_rapid_runner.py"
+    script.write_text(
+        "import json,sys\n"
+        "from rapidocr_onnxruntime import RapidOCR\n"
+        "ocr=RapidOCR()\n"
+        "out={}\n"
+        "for p in sys.argv[1:]:\n"
+        "    result,_=ocr(p)\n"
+        "    lines=[line[1] for line in (result or [])]\n"
+        "    out[p]='\\n'.join(lines)\n"
+        "print('<<<JSON>>>')\n"
+        "print(json.dumps(out,ensure_ascii=False))\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        env.pop(key, None)
+    env["NO_PROXY"] = "*"
+    completed = subprocess.run(
+        [str(SYSTEM_PYTHON), str(script), *[str(p) for p in images]],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=env,
+    )
+    if "<<<JSON>>>" not in completed.stdout:
+        raise RuntimeError(
+            f"RapidOCR 失败 rc={completed.returncode}\n"
+            f"stdout尾部: {completed.stdout[-1500:]}\n"
+            f"stderr尾部: {completed.stderr[-1500:]}"
+        )
+    payload = completed.stdout.split("<<<JSON>>>", 1)[1].strip()
+    return json.loads(payload)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pdf", default=str(ROOT / "南京路彼岸" / "2026-08-09风起云涌.pdf"))
     parser.add_argument("--pages", default="2,5,8,10", help="逗号分隔的页号（要选文本层完好的页）")
     parser.add_argument("--dpis", default="140,300", help="逗号分隔的 DPI")
     parser.add_argument("--skip-paddle", action="store_true")
+    parser.add_argument("--skip-rapid", action="store_true")
     args = parser.parse_args()
 
     from pypdf import PdfReader
@@ -172,6 +211,25 @@ def main() -> int:
                 })
                 (WORK / f"paddle-p{page:02d}-dpi{dpi}.txt").write_text(text, encoding="utf-8")
 
+    if not args.skip_rapid:
+        import time
+
+        for dpi in dpis:
+            images = [rendered[(dpi, page)] for page in pages]
+            t0 = time.perf_counter()
+            got = run_rapid(images)
+            cost = time.perf_counter() - t0
+            print(f"RapidOCR dpi={dpi}: {len(images)} 页 {cost:.1f}s（{cost / len(images):.2f}s/页）")
+            for page in pages:
+                text = clean_text(got.get(str(rendered[(dpi, page)]), ""), ocr=True)
+                rate, hit, total = recall(truth[page], text)
+                results.append({
+                    "engine": "rapid", "dpi": dpi, "page": page,
+                    "recall": rate, "hit": hit, "total": total,
+                    "out_chars": len(re.sub(r"[^一-鿿]", "", text)),
+                })
+                (WORK / f"rapid-p{page:02d}-dpi{dpi}.txt").write_text(text, encoding="utf-8")
+
     print(f"{'引擎':10s}{'DPI':>6s}{'页':>4s}{'还原率':>9s}{'命中/总':>12s}{'输出汉字':>10s}")
     for row in results:
         ratio = "{}/{}".format(row["hit"], row["total"])
@@ -181,7 +239,7 @@ def main() -> int:
 
     print()
     print(f"{'引擎':10s}{'DPI':>6s}{'加权还原率':>12s}")
-    for engine in ("windows", "paddle"):
+    for engine in ("windows", "paddle", "rapid"):
         for dpi in dpis:
             subset = [r for r in results if r["engine"] == engine and r["dpi"] == dpi]
             if not subset:

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-23T03:18:40.198655+00:00",
+  "generated_at": "2026-08-24T14:30:05.114768+00:00",
   "passed": 15,
   "total": 15,
   "success": true,
@@ -32,12 +32,12 @@
     {
       "name": "全部来源内容入库",
       "passed": true,
-      "detail": "{\"fulibei\": {\"documents\": 110, \"parents\": 441, \"chunks\": 1444}, \"nanjinglu_bian\": {\"documents\": 43, \"parents\": 95, \"chunks\": 586}, \"tulip_garden\": {\"documents\": 42, \"parents\": 161, \"chunks\": 1213}, \"panfeng\": {\"documents\": 29, \"parents\": 60, \"chunks\": 186}, \"aizaibingchuan\": {\"documents\": 2609, \"parents\": 5483, \"chunks\": 7338}, \"kongkonglong\": {\"documents\": 14, \"parents\": 32, \"chunks\": 172}, \"boduanzhimen\": {\"documents\": 849, \"parents\": 1690, \"chunks\": 8082}}"
+      "detail": "{\"fulibei\": {\"documents\": 110, \"parents\": 441, \"chunks\": 1444}, \"nanjinglu_bian\": {\"documents\": 43, \"parents\": 94, \"chunks\": 584}, \"tulip_garden\": {\"documents\": 42, \"parents\": 155, \"chunks\": 1212}, \"panfeng\": {\"documents\": 29, \"parents\": 60, \"chunks\": 186}, \"aizaibingchuan\": {\"documents\": 2609, \"parents\": 5483, \"chunks\": 7338}, \"kongkonglong\": {\"documents\": 14, \"parents\": 32, \"chunks\": 172}, \"boduanzhimen\": {\"documents\": 850, \"parents\": 1668, \"chunks\": 8029}}"
     },
     {
       "name": "统一检索块",
       "passed": true,
-      "detail": "块数=19021"
+      "detail": "块数=18965"
     },
     {
       "name": "检索块字段",
@@ -57,12 +57,12 @@
     {
       "name": "索引记录数一致",
       "passed": true,
-      "detail": "SQLite={\"documents\": 3696, \"parents\": 7962, \"chunks\": 19047} JSONL={\"documents\": 3696, \"parents\": 7962, \"chunks\": 19047}"
+      "detail": "SQLite={\"documents\": 3697, \"parents\": 7933, \"chunks\": 18991} JSONL={\"documents\": 3697, \"parents\": 7933, \"chunks\": 18991}"
     },
     {
       "name": "样例检索",
       "passed": true,
-      "detail": "{\"情绪周期\": 723, \"仓位 回撤\": 2348, \"92科比\": 94, \"筹码\": 990, \"弱转强\": 368}"
+      "detail": "{\"情绪周期\": 725, \"仓位 回撤\": 2353, \"92科比\": 95, \"筹码\": 992, \"弱转强\": 366}"
     },
     {
       "name": "方法卡审批进度",

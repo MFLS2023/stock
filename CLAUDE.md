@@ -2,10 +2,13 @@
 
 > 项目根目录：`C:\Users\20577\Documents\炒股\知识库`
 > 索引数据库：`_知识库系统\indexes\knowledge.db`
-> 最后更新：2026-08-23（**方向校准：第一定位改为一问一答问答库，方法卡降级为可选副产品，kb-ask 成为默认入口**；当日实测全库 19047 块 / 7 来源。
-> 同日 `_导师试验` 全面审查：四导师格局落定、孤儿技能 panfeng-trading 收编进项目、
-> README 补记 v4.0/v3.0 升级出处 —— 本轮只改文档与登记，未动任何导师内容本体）
-> 上一次：2026-08-09（第 7 个来源「主升龙头空空龙」172 块接入；同义词表升 v5 补防爆头词汇域）
+> 最后更新：2026-08-24（**全面修复轮**：① OCR 引擎切 RapidOCR，南京路/郁金香/波段之门付费层用 dual 双引擎逐图择优，
+> 坏块率大幅下降且可信片段保留率复核通过；② 检索四项速赢——预览截断 420→1200、同形词降噪闸门、兜底重切四个
+> 触发条件、`--expand` 默认开，同义词表升 v6；③ 结构修复——sources.yaml 整文件回写清零、select_sector_strong
+> 静默降级修复、三公式补测试、复利杯闲聊标记 22 块并排序降权。当日实测全库 **18991 块** / 7 来源。
+> ⚠️ 历史上出现过的 19047 / 18951 / 18875 等都是中间态，以现测为准）
+> 上一次：2026-08-23（方向校准：第一定位改为一问一答问答库，方法卡降级为可选副产品，kb-ask 成为默认入口；
+> `_导师试验` 全面审查）
 > ⚠️ **本文件里出现过的 18913 / 18875 / 18901 / boduanzhimen 8187 / nanjinglu 551、568、587
 > 都是中间状态，已不成立。** 以 `build_index.py` 输出和 `SELECT source_id,COUNT(*)` 为准：
 > 2026-08-09 18:0x 实测全库 **18951**（kongkonglong 172、郁金香 OCR 重跑 1181→1213），
@@ -40,7 +43,9 @@ AI 查库后用人话回答，并说清是谁说的、出自哪篇。这是本�
 **核心指标是问答质量，不是方法卡数量，也不是可检索记录数。**
 衡量口径：真实问题测试集上「能据此正确作答」的比例，以及回答中的引用是否可回溯。
 基线（2026-08-23 实测，12 题来自方法卡未解问题）：8 能答 / 2 半答 / 1 不能答 /
-1 能答带同形词噪声，原始证据在 `reports/_demo1_raw.txt`。改动检索或 skill 后重跑对比。
+1 能答带同形词噪声，原始证据在 `reports/_demo1_raw.txt`；2026-08-24 检索修复后重跑
+（`_demo1_raw_v2_20260824.txt`）：带噪声案例清零、截断复原、其余不劣于基线。
+改动检索或 skill 后重跑对比。
 
 **方法卡已降级为可选副产品（2026-08-23 用户决定）：**
 - 已审的 20 张保留在索引里——Demo 1 实测它们是问答场景的第一命中资产，一张不动
@@ -51,13 +56,14 @@ AI 查库后用人话回答，并说清是谁说的、出自哪篇。这是本�
 
 ## 运行环境（两个解释器，各缺一样东西）
 
-本机有两个 Python，**没有哪一个能跑全部脚本**。2026-08-08 在这上面踩了三次，
-所以写进文档：
+本机有两个 Python。**2026-08-24 起 Python312 是事实上的全能解释器**（yaml/numpy/pandas/
+requests/PIL/docx/pypdf/rapidocr 全有，全套 225 项测试在它上面跑），codex 运行时
+曾在 08-07 被重置、pip 包全丢（yaml/requests 都没有了），别再默认它什么都能跑：
 
-| 用途 | 解释器 | 有 | 缺 |
-|------|--------|----|----|
-| 跑测试、导入器 | `~/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe` | pypdf、PIL、yaml、requests | — |
-| 建索引、校验、查询 | `C:\Users\20577\AppData\Local\Programs\Python\Python312\python.exe` | yaml、requests、PIL、**python-docx** | **pypdf**、pdfplumber |
+| 用途 | 解释器 | 状态 |
+|------|--------|----|
+| **测试、导入器、建索引、校验、查询、OCR（全用这个）** | `C:\Users\20577\AppData\Local\Programs\Python\Python312\python.exe` | ✅ 全能 |
+| codex 运行时 | `~/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe` | ⚠️ 08-07 重置后只剩标准库；其 `native/poppler` 二进制仍可用且被 `_bench_ocr.py` 引用 |
 
 **上表漏了一条：Python312 有 `python-docx`**（2026-08-09 实测 `import docx` 成功）。
 所以纯 docx/txt 的来源（如 `kongkonglong`）用 Python312 就能跑完导入+建索引全流程，
@@ -134,15 +140,15 @@ Claude Code 现可见 **18 个 skill**（2026-08-23 `ls` 实数，随增删变�
 
 ## 当前已接入的来源
 
-**索引实测 19047 块 / 7 个来源**（2026-08-23 核实，`build_index.py` 输出 + 逐来源 `SELECT source_id,COUNT(*) GROUP BY`）：
+**索引实测 18991 块 / 7 个来源**（2026-08-24 核实，OCR 引擎切换重跑后；以现测为准）：
 
 | id | display_name | 索引内块数 | 载体 | 批准日期 |
 |----|--------------|------|------|---------|
-| `boduanzhimen` | 波段之门 | **8082** | 公众号 md + 付费扫描 PDF（OCR） | 2026-08-09 |
+| `boduanzhimen` | 波段之门 | **8029** | 公众号 md + 付费扫描 PDF（OCR） | 2026-08-09 |
 | `aizaibingchuan` | 爱在冰川 | **7338** | 微信公众号 Markdown + 9 篇 PDF/docx 汇编 | 2026-08-04 |
 | `fulibei` | 复利杯 | 1470 | 语音转写文字稿 | — |
-| `tulip_garden` | 郁金香花园 | **1213** | Word + 截图 | — |
-| `nanjinglu_bian` | 南京路彼岸 | **586** | PDF 文章 | — |
+| `tulip_garden` | 郁金香花园 | **1212** | Word + 截图 | — |
+| `nanjinglu_bian` | 南京路彼岸 | **584** | PDF 文章 | — |
 | `panfeng` | 我有上将潘凤 | 186 | 飞书聊天记录 HTML | 2026-08-02 |
 | `kongkonglong` | 主升龙头空空龙 | **172** | docx/txt 方法论长文 | 2026-08-09 |
 
@@ -172,8 +178,8 @@ Claude Code 现可见 **18 个 skill**（2026-08-23 `ls` 实数，随增删变�
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| `author_reply` | **4984** | 比正文块（`article_body` 1909 + `paid_article` 542）还多 |
-| `chart_ocr` | **628** | K 线图内文字，3718 张里筛出约 17%（下方专节；2026-08-09 句读门槛修正后从 532 升到 628） |
+| `author_reply` | **4984** | 比正文块（`article_body` 1909 + `paid_article` 531）还多 |
+| `chart_ocr` | **586** | K 线图内文字，引擎切 RapidOCR 后 628→586、汉字量持平且坏块率归零（下方专节） |
 | `indicator_formula` | **19** | **全库唯一带可执行指标公式的类型** |
 
 **⚠️ 不要把它当成「波浪理论」的库。** 实测词频：`波浪` 64 块、`艾略特` 22、
@@ -273,10 +279,11 @@ OCR 原理上做不到。替代路线是**用公式重算**：他的图都是通
 干货密度低，闲聊多（前 10-15 分钟属于正常）。
 有价值的部分是一线交易员实战思路（闻少、曾一六等）。
 
-**⚠️ 已知问题（截止 2026-08-01）：**
-- `claim_type` 全部固定为 `opinion_or_case`，不可用于过滤
+**⚠️ 已知问题（截止 2026-08-01；2026-08-24 更新）：**
+- `claim_type` transcript 主体固定为 `opinion_or_case`；方法卡 rule 20 / 分歧卡 opinion 6 有区分
 - `confidence` 全部固定为 `medium`，不可用于过滤
-- 闲聊段落未标记，检索会混入无关结果
+- ~~闲聊段落未标记~~ **已修 2026-08-24**：22 块标 `chunk_type=chitchat` 并在排序层 -3
+  （`mark_fulibei_chitchat.py`，人工逐条核对；仍可检索）。开场寒暄不再抢 top 位
 - ASR 同音字多：竞价/竟价，顺灏/顺浩同学
 
 ---
@@ -297,11 +304,14 @@ OCR 原理上做不到。替代路线是**用公式重算**：他的图都是通
 **块数 525 → 586，正文字符 213765 → 241927。** 三层现状（表外字率 = 该层汉字里
 不在文本层字表 1968 字内的比例，越低越干净）：
 
-| chunk_type | confidence | 块数 | 表外字率 | 内容 |
+| chunk_type | confidence | 块数（08-24） | 表外字率* | 内容 |
 |-----------|-----------|-----|---------|------|
-| `article` | high | **252** | **0.0%** | 文本层正文，完全干净 |
-| `article` | medium | **107** | 5.8% | 无文本层页的正文，OCR 承载 |
-| `screenshot_ocr` | low | **227** | 8.6% | 截图内容，仅此层可得 |
+| `article` | high | **252** | 0.0% | 文本层正文，完全干净 |
+| `article` | medium | **104** | 5.8%* | 无文本层页的正文，OCR 承载 |
+| `screenshot_ocr` | low | **228** | 8.6%* | 截图内容，仅此层可得 |
+
+\* 表外字率是 08-09 引擎切换前测的；08-24 换 RapidOCR+dual 后坏块率
+35%/29% → 17%/14%，受灾片段保留率复核通过（见「OCR 引擎」一节）。
 
 原来整页渲染成 PNG 再 OCR，现在**直接提取页面里的嵌入图像对象**
 （`kb_import_utils.extract_page_images`）。关键实测：
@@ -823,6 +833,35 @@ v2.0 模型4 改名「情绪流循环原则」（「情绪流」郁金香 71 块
 
 ---
 
+## OCR 引擎（2026-08-24 切换：RapidOCR 为主，dual 双引擎保底）
+
+**入口在 `kb_import_utils.ocr_images(engine=...)`**，预处理（EXIF 转正/缩宽/竖向分片）两引擎共用一套。
+默认 `rapid`（rapidocr_onnxruntime，模型随包自带、纯 CPU、不联网）；环境变量 `KB_OCR_ENGINE=windows` 可整体回退。
+
+| 层 | 引擎 | 坏块率变化 | 说明 |
+|---|---|---|---|
+| 波段之门 chart_ocr | rapid 纯跑 | 14% → **0%** | 汉字量持平（49123→49192），块更少更干净 |
+| 爱在冰川 course_ocr | rapid 纯跑 | 92% → **0%** | 汉字量持平；数字仍需回看原页 |
+| 南京路 screenshot/article(ocr) | **dual** | 29%/35% → **14%/17%** | 汉字量 -116（基本持平）；受灾片段保留率 100%/86% |
+| 郁金香 image_ocr | **dual** | 25% → **21%** | 汉字量 **+3137** 反超旧版；四篇受灾文档保留率全部 100% |
+| 波段之门 paid_article | **dual** | 26% → **20%** | 《瑞》文可信片段保留率 4% → 100% |
+
+ground truth 基准：南京路文本层页还原率 Windows 40.2% vs Rapid **92.4%**（`_bench_ocr.py`）。
+
+**为什么南京路/郁金香/付费层必须 dual**：全量对比发现 rapid 有两种抽样测不出的失败——
+①**半读**：《题材是否抬头》只认出页面一角（453/4198 字），18 个可信片段 0% 存留；
+②**假汉字乱码**：郁金香美图长截图输出「写K不_TT」式乱码，字数虚高。失灵判据
+（汉字过少 / 拉丁占比>0.40，`kb_import_utils._rapid_degenerate`）拦不住半读，
+所以这三处两台引擎都跑、逐图取汉字多者。代价是每图两次识别，仅给小体量来源用。
+
+缓存版本键现况：nanjinglu `CACHE_VERSION=8`、tulip `OCR_CACHE_VERSION=5`、
+boduanzhimen 图表 `OCR_CACHE_VERSION=2` + 付费页独立 `PDF_OCR_CACHE_VERSION=1`
+（此前波段之门两类缓存都没有版本键，换引擎不会触发重算——已补齐）。改引擎/预处理必须 bump 对应键。
+
+被拒 K 线图（~3100 张）门槛放宽评估结论：**不放宽**。缓存原始文本粗探显示放宽到
+16 字/0.30 也只能救回 28%，且救回的多是行情面板残渣与数字汤。新引擎下若个别图
+质量跃升，属缓存自然更新，无需动门槛。
+
 ## 数据层级与可信度
 
 ```
@@ -839,19 +878,21 @@ v2.0 模型4 改名「情绪流循环原则」（「情绪流」郁金香 71 块
 | claim_type 字段 | **六个来源不可信**（均为写死的固定值，绝大多数是 `opinion_or_case`）；**唯一例外是 `kongkonglong`**：`rule_or_method` 158 / `opinion_or_case` 5，按文档性质实标，可用于过滤 |
 | confidence 字段 | 只有南京路、郁金香可信；`aizaibingchuan` 正文部分与 `panfeng` 固定 `high`，`fulibei` 固定 `medium` |
 
-**`confidence=high` 不等于高可信。** 2026-08-04 增量导入后实测取值分布（下表 9175 是
-jsonl 口径，含 20 张 draft 方法卡；索引内是 9155，见下方说明）：
+**`confidence=high` 不等于高可信。** 2026-08-24 重测取值分布（**此前文档的结论是颠倒的，
+已改正——四源有真实梯度，唯一写死的是 kongkonglong**）：
 
 | source_id | high | medium | low | 其他 | 是否有真实区分 |
 |-----------|------|--------|-----|------|--------------|
-| `nanjinglu_bian` | 238 | 101 | 186 | — | 有 |
-| `tulip_garden` | 507 | 674 | — | — | 有 |
-| `aizaibingchuan` | 5764 | 36 | 13 | — | 仅额外资料那 49 块有；正文 5764 块是写死的 |
+| `aizaibingchuan` | 7289 | 36 | 13 | — | 正文写死 high；medium/low 全在额外资料与讲义 |
+| `boduanzhimen` | 6939 | 1143 | — | — | 有 |
+| `tulip_garden` | 511 | 702 | — | — | 有 |
+| `nanjinglu_bian` | 252 | 104 | 228 | — | 有 |
 | `panfeng` | 186 | — | — | — | 无，写死 |
-| `fulibei` | — | 1444 | — | curated 26 | 无，写死 |
-| `kongkonglong` | 172 | — | — | — | 无，写死（但该来源的 `claim_type` 和 `date_precision` 有真实区分） |
+| `fulibei` | — | 1444 | — | curated 26 | transcript 写死 medium |
+| `kongkonglong` | 172 | — | — | — | **无，写死**（但该来源的 `claim_type`/`date_precision` 有真实区分） |
 
-跨来源按 `confidence` 排序会把爱在冰川的 5764 块正文整体顶到最前，这是假象。
+跨来源按 `confidence` 排序仍会把 aizaibingchuan/boduanzhimen 的高分块整体顶前，
+这是假象；但旧版「六源全写死、仅南京路/郁金香可信」的说法不成立。
 
 **南京路检索优先级：** `chunk_type=article` + `confidence=high`（文本层正文）
 优先于 `medium`（OCR 正文）优先于 `screenshot_ocr`（截图，须标注低置信度）。
@@ -962,7 +1003,9 @@ python _知识库系统/scripts/refresh_regression_baseline.py --write   # 确�
 
 数字小的词照样要查 —— 低频不等于无效，`先于龙` 只有 9 块但 7 块在南京路，是该来源的独特说法。
 
-**这张表是给人看的，机器版在 `config\synonyms.yaml`（已升 v4）**，
+**这张表是给人看的，机器版在 `config\synonyms.yaml`（2026-08-24 已升 v6：41 组 / 208+ 词；
+新增十字路口→节点族、高位分歧、板块阶段、边际强化、无机会五组用户问法对齐，
+补齐主干/滑点/大小题材三处「注释认领了但词没进 variants」的半成品）**，
 由 `query_kb.py --expand` 读取。配置文件是唯一被代码消费的事实来源，
 且它的命中数按 18875 块重测过（现库 18901，命中数会略偏低）。v4 相对本表多了四组波段之门的词汇
 （波段 / 浪型 / 背驰 / 指标公式）。
@@ -988,6 +1031,24 @@ python _知识库系统/scripts/refresh_regression_baseline.py --write   # 确�
 术语表从 `synonyms.yaml` 汇总（141 词），按长度降序匹配 —— 先长后短，
 `情绪周期` 不会被先切成 `情绪` 再剩 `周期`。**只做术语提取不做通用分词**：
 通用分词要引依赖，且会把「怎么」「判断」这类疑问词也切出来，反而降精度。
+
+### 检索与回答质量的四项速赢（2026-08-24）
+
+demo1 十二题重跑暴露的四个问题同日修完（`query_kb.py`）：
+
+1. **预览截断 420→1200 字**（`--preview N` 可调）：方法卡曾被打成半句
+   （「知道适」「怎么判断大小题」），一道半答可能就是截断造成的。
+2. **同形词降噪闸门**：多词查询里「只命中短拉丁/数字弱词」的块整体后置——
+   「plan abc」曾把「ABC 板块博弈」「abc 浪形」捞进 Top4。
+3. **兜底重切扩到四个触发条件**：零结果 / 全无正文命中 / 只命中字母串 /
+   强候选≤1 但输出被弱块塞满。整句里的中文粘成长伪词时（如「怎么做次日的买卖计划」）
+   原本只能靠 plan/abc 字母串命中，现在自动切词重试。
+4. **`--expand` 默认开**（`--no-expand` 反向）；查波段之门建议 `--no-expand`
+   （同义词表是短线体系建的，对他家引入噪声，见 `reports/boduanzhimen_改进清单.md` P1-1）。
+
+重跑结果：`reports/_demo1_raw_v2_20260824.txt`——带噪声案例清零、截断复原，
+其余不劣于基线。注意基线口径的已知水分：八道能答题的首位命中全是方法卡，
+卡文里嵌着与提问近乎逐字的「用户未解问题」，检索部分是在匹配卡片自己记录的缺口。
 
 | 概念 | 各来源常见写法 |
 |------|--------------|
@@ -1125,8 +1186,9 @@ proxy 环境变量并设 `NO_PROXY="*"` —— `trust_env=False` 管不到库内
 | ~~P0~~ | ~~LIKE 兜底候选池按 rowid 截断~~ | 已修（阶段 2） | 兜底连同 `candidate_limit` 一起删了，改为取全量候选再在 Python 侧排序（`query_kb.py:607` `rank_and_truncate`）。**此前本表写的「前 50 条 100% 全是爱在冰川」是错的** —— 那个数字来自手写 `ORDER BY rowid LIMIT 50` 模拟，而那条代码路径已不存在。走真实 `search()` 实测：`龙头` 前 50 是复利杯 28 + 冰川 12 + 南京路 10，`筹码` 前 8 是郁金香 8/8 |
 | P1 | 短词检索耗时随语料线性上涨 | 9175 块下 `板块` 150ms、`龙头 竞价 弱转强` 246ms。短词模式凑不出 trigram，必然全表扫描，语料再翻倍就要上秒 | 2026-08-04 已做一轮：三列 UNION 合成 `chunks` 表单次 OR 扫描，1.4–1.7 倍（见 `query_kb.py` 的 `SHORT_TERM_RECALL_SQL`）。下一步只能换召回结构（如两字词倒排表），不是调参能解决的 |
 | ~~P0~~ | ~~`build_index.py` 不按 `sources.yaml` 的 `status` 过滤~~ | 已修复 2026-08-04 | 读 `sources.yaml` 白名单（`integrated` / `integrated_first_pass`）；新增来源落盘但 `status` 不在白名单，索引自动跳过并记入 `skipped_sources`。`source_name` 硬编码"复利杯"同步修复，现从登记表取 `display_name`。方法卡加 `status` 字段门槛：只有 `status=reviewed` 的卡进索引，全部 20 张当前为 `draft`，需人工逐一审批后改状态。`validate_kb.py` 同步加入 status 一致性和索引来源合法性两项校验 |
-| **P0**（部分已修） | **导入脚本用 `yaml.safe_dump` 重写整个 `sources.yaml`，把注释和手写格式全抹掉** | 2026-08-09 实测：跑一次 `import_boduanzhimen.py` 后注释归零、`generic_supported_extensions` 从行内数组变成多行列表。**当前该文件有 24 行注释**（本表此前写 14 行，是更早的状态）。更糟的是**并行会话时会互相抹掉对方的登记** —— 那次恢复格式时又抹掉了别人刚加的 `kongkonglong` 整段和 `nanjinglu_bian` 的 4 个新字段（都已手工补回并逐字段核对）；反向也发生过一次：接入 kongkonglong 时我用 HEAD 内容做 replace，把并发会话刚写的 `tulip_garden` 字段冲掉并写出了解析不了的 YAML，`git checkout HEAD --` 后重做 | **`import_kongkonglong.py` 已改为完全不回写全局登记表**（只写自己目录的 `source.yaml`，并打印提示让人手改），这是最省事的解法。`register_source.py` / `import_boduanzhimen.py` / `import_nanjinglu.py` / `import_aizaibingchuan.py` **仍有此问题，未动**。代价是登记表变成靠人手改 —— 已在 `validate_kb.py` 补「登记表块数一致性」检查兜底（加检查时就抓到 `nanjinglu_bian` 登记 551、实际 586，差 35 无人发现）。临时缓解：跑完导入立刻 `git diff sources.yaml` 检查，别直接提交 |
-| P1 | 各来源 claim_type 均为固定值 | 元数据过滤失效 | 规则+LLM 重新标注。**例外：`kongkonglong` 已有真实区分**（`rule_or_method` 167 / `opinion_or_case` 5） |
+| ~~P0~~ | ~~导入脚本用 `yaml.safe_dump` 重写整个 `sources.yaml`，把注释和手写格式全抹掉~~ | **已全部修复 2026-08-24**。`import_kongkonglong.py`（08-09）、`register_source.py` 与 `import_generic_source.py`（08-24，改为打印待手改的登记块/字段）；经查 `import_nanjinglu.py` / `import_aizaibingchuan.py` 本来就不碰登记表（旧文档说法有误）。代价是登记表靠人手改——`validate_kb.py` 的「登记表块数一致性」检查兜底（本轮它就抓到 nanjinglu 登记 586、实际 584），重导后记得手改 `sources.yaml` 的 `last_import_summary` 并核对注释还在 |
+| P1 | 各来源 claim_type 均为固定值 | 元数据过滤失效 | 规则+LLM 重新标注。**例外：`kongkonglong` 已有真实区分**（`rule_or_method` 167 / `opinion_or_case` 5）；fulibei 的策展块也有（方法卡 rule 20 / 分歧卡 opinion 6），但 transcript 主体仍是常量 |
+| ~~P1~~ | ~~复利杯闲聊未标记~~ | **已修 2026-08-24** | `mark_fulibei_chitchat.py`：规则候选 25 条、人工逐条核对后标 22 条 `chunk_type=chitchat`，排序层 -3 降权；实测「龙头」top1 从寒暄块回到战法内容。已标记的块仍可检索 |
 | ~~P1~~ | ~~`add_chunk` 的 NOT NULL 列被空串绕过，`chunk_type` 缺失时默认 `"text"`~~ | 已修 2026-08-09 | SQLite 的 NOT NULL 只挡 None、不挡 `""`，而 `item.get(name, "")` 恰好把「字段缺失」变成空串 —— 没有正文/定位/标题的块能静默入库，检索时是查得到却读不懂的空壳。`chunk_type` 更隐蔽：兜底值 `"text"` 不在任何来源的 21 个真实取值里，按类型过滤会永远漏掉这批块。现在 `add_chunk` 显式拦截，并加 `KNOWN_CHUNK_TYPES` 白名单（新增类型必须登记，否则建索引失败）。测试 `ChunkFieldGuardTests` 8 个用例锁住，含一条反向断言：真库里出现的 `chunk_type` 必须都已登记。**当前数据本来就干净（4 列零空值、无 `text` 类型），这是防将来的加固** |
 | ~~P1~~ | ~~判「举例年份」用引导词黑名单，双向都不准~~ | 已修 2026-08-09 | 旧实现 `(?:比如\|例如\|回顾\|早在…)[^。！？\n]{0,12}?(20\d{2})年` 实测：30 个举例句式**漏 19 个**（`像2021年那波`、`拿2019年来说`、`以2017年为例`、`2015年那波杠杆牛` 都不含表里的词），10 个作者自指句**误排 6 个**（`例如2025年初我就说过` 同时含引导词和自指）。讽刺的是那版注释里举的「该保留」例句 `早在2026年初就锚定了国产替代` 自己就在黑名单里。**引导词是无穷集合，黑名单注定漏；自指句也用引导词，注定误伤。** 换判据：不猜句式，只判「这个年份配不配当成文时间」—— 成文只可能是当年或前一年，更早的一定在讲历史。新判据举例漏 **0/11**、自指误排 **0/7**，混合句能只留近期年份，无参照年时返回空（宁缺勿错）。真实 14 篇日期一字未变。测试 `WritingYearTests` |
 | P1 | 波段之门连发留言曾被错配同一条占位提问（如「Feng Jian:沙发」）—— **主问题已修**：重导后连发的第 2 条起改用独立前缀 `作者续言（承接本篇第N条，同一串第M条）：…`（实测 641 块），不再冒充在回答上面的读者留言；引用续言别拿上面那条提问当语境。**未核**：原方案里的候选 question 占位过滤（命中就按 `作者留言：xxx` 处理）是否单独实现过 |

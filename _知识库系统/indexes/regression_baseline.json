@@ -21,13 +21,13 @@
   "row_counts": {
     "chunks": {
       "fulibei": 1470,
-      "nanjinglu_bian": 586,
-      "tulip_garden": 1213
+      "nanjinglu_bian": 584,
+      "tulip_garden": 1212
     },
     "parents": {
       "fulibei": 441,
-      "nanjinglu_bian": 95,
-      "tulip_garden": 161
+      "nanjinglu_bian": 94,
+      "tulip_garden": 155
     },
     "documents": {
       "fulibei": 110,
@@ -36,25 +36,25 @@
     }
   },
   "prose_matches": {
-    "竞价": 417,
-    "筹码": 373,
-    "龙头": 612,
-    "打板": 187,
-    "情绪": 911
+    "竞价": 428,
+    "筹码": 375,
+    "龙头": 608,
+    "打板": 188,
+    "情绪": 912
   },
   "title_only_extra": {
-    "竞价": 56,
+    "竞价": 54,
     "筹码": 50,
     "龙头": 310,
-    "情绪": 424
+    "情绪": 431
   },
   "recall_union": {
-    "情绪周期": 517,
+    "情绪周期": 519,
     "龙头与核心": 0,
-    "弱转强": 119,
+    "弱转强": 117,
     "筹码断层": 52
   },
-  "topics_filled": 3269,
+  "topics_filled": 3266,
   "history": [
     {
       "date": "2026-08-02",
@@ -100,6 +100,15 @@
         "tulip_garden": 1213
       },
       "why": "郁金香花园 2026-08-09 的截图 OCR 放大重跑(OCR_TARGET_WIDTH=2000, OCR_CACHE_VERSION=2)落定后基线一直没写入, 主套件红了 15 天。变化全部在 tulip_garden: chunks 1181→1213 / parents 155→161, 五个 prose 词四涨一平一跌(情绪 877→911、竞价 393→417、筹码 370→373、打板 186→187、龙头 613→612), topics_filled 3237→3269。性质与南京路 08-09 那次相同: 放大让 OCR 认出更多字, 切块边界随之改变 —— 龙头微降 1 是块级分布变化, 不是内容丢失(CLAUDE.md 已有同类案例记录)。fulibei / nanjinglu_bian 一字未动, 与 CLAUDE.md 记载一致。本次写入是《待处理-数据漂移与冻结样本破坏-20260809》开放项第 1 条的闭环, 由 2026-08-24 全面修复轮执行; 写入前已备份 knowledge.db 到 indexes/backups/knowledge-20260824.db。"
+    },
+    {
+      "date": "2026-08-24 (第二次, OCR 引擎切换)",
+      "chunks": {
+        "fulibei": 1470,
+        "nanjinglu_bian": 584,
+        "tulip_garden": 1212
+      },
+      "why": "OCR 引擎从 Windows.Media.Ocr 切换为 RapidOCR(默认)+dual 双引擎逐图择优(南京路/郁金香/波段之门付费层)。A/B 实测(_bench_ocr.py 文本层页做 ground truth): 南京路页还原率 Windows 40.2% vs Rapid 92.4%。全量对比发现 rapid 有两种抽样测不出的失败——半读(南京路《题材是否抬头》18 个可信片段 0% 存留)与整页假汉字乱码(郁金香《22截屏》), 纯 rapid 模式曾丢 1.2 万/4.3 万汉字, 故这两源最终采用 engine=dual: 两台引擎都跑、逐图取汉字多者。终态复核: 南京路 OCR 层汉字 57357→57241(-116, 基本持平), 受灾文档可信片段保留率 100%/86%; 郁金香 150824→153961(+3137), 四篇受灾文档全部 100%。\n\n块数微降(nj 586→584 / tulip 1213→1212 / parents 各 -1~-6)与词命中数小幅波动(竞价 417→428 等)是 OCR 文字变化后切块边界重排的正常结果, 与 08-09 那次同类 —— 命中块数升降不等于内容丢失, 已用片段保留率单独验证。fulibei 一字未动(闲聊标记只改 chunk_type 不改 text)。波段之门不在样本内: chart_ocr 层 rapid 纯跑汉字量持平(49123→49192), paid_article 层 dual 后《瑞》文可信片段保留率 4%→100%。"
     }
   ]
 }
