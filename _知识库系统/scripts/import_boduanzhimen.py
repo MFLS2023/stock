@@ -96,6 +96,13 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 TEXT_EXTS = {".md", ".txt"}
 ALT_EXTS = {".html", ".mhtml", ".docx", ".pdf"}
 
+# OCR 缓存版本键（2026-08-24 补）。此前本导入器的两类缓存都没有版本字段——
+# 南京路/郁金香靠 CACHE_VERSION/OCR_CACHE_VERSION 常量实现「改引擎或预处理即全量
+# 重算」，这里没有，导致换了 OCR 引擎旧缓存照样命中、新引擎永远不生效。
+# 规则与 import_tulip_garden.py:299 一致：读缓存时校验版本，不符按未命中重算并覆写。
+# 改 OCR 引擎 / 预处理 / clean_text(ocr=True) 时 bump 这个数。
+OCR_CACHE_VERSION = 1
+
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -430,7 +437,11 @@ def extract_pdf_pages(path: Path, *, ocr_scanned: bool = False, cache_dir: Path 
             if not ocr_scanned:
                 units.append({"locator": f"第{index}页", "text": text, "method": "low_text", "confidence": "low"})
                 continue
-            digest = hashlib.sha256(f"{path}|{index}|{dpi}".encode("utf-8")).hexdigest()
+            # 版本号拼进摘要串：bump OCR_CACHE_VERSION 即换一批缓存文件名，
+            # 旧文件自然失效（留在目录里不碍事，想清理可删 pdf-*.json）。
+            digest = hashlib.sha256(
+                f"{path}|{index}|{dpi}|ocrv{OCR_CACHE_VERSION}".encode("utf-8")
+            ).hexdigest()
             cache = (cache_dir / f"pdf-{digest[:16]}.json") if cache_dir else None
             if cache is not None and cache.exists():
                 try:
@@ -682,8 +693,10 @@ def main() -> int:
             elif reply.get("run_first_order"):
                 # 只写首条的序号，不复制它的正文 —— 复制会被 FTS 重复索引
                 # （实测前缀占续言块内容 33.2%，`板块` 虚增 15 块）。
-                text = (f"作者续言（承接本篇第{reply['run_first_order']}条，"
-                        f"同一串第{reply['run_index']}条）：{reply['answer']}")
+                # ⚠️ 括号必须是半角 ( )：库里现存 641 条前缀就是半角（2026-08-24 实测），
+                # 这里曾误写全角（），重导一次就会让 641 条前缀整体翻转、FTS 词频漂移。
+                text = (f"作者续言(承接本篇第{reply['run_first_order']}条，"
+                        f"同一串第{reply['run_index']}条)：{reply['answer']}")
             else:
                 text = f"作者留言：{reply['answer']}"
             units.append(
@@ -716,6 +729,10 @@ def main() -> int:
                 if cache.exists():
                     try:
                         cached = json.loads(cache.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        cached = None
+                    # 版本不符按未命中处理：排队重算，识别结果会带新版本号覆写回同一文件。
+                    if isinstance(cached, dict) and int(cached.get("cache_version") or 0) == OCR_CACHE_VERSION:
                         # 缓存存的是原始识别结果，质量门槛在这里重新判一次：
                         # 门槛调整后旧缓存不必重跑 OCR，也不会绕过过滤。
                         cached_text = cached.get("text", "")
@@ -728,8 +745,7 @@ def main() -> int:
                         else:
                             stats[f"ocr_dropped_{reason.split('(')[0]}"] += 1
                         continue
-                    except (OSError, json.JSONDecodeError):
-                        pass
+                    stats["ocr_cache_stale"] += 1
                 ocr_queue.append((key, path))
                 ocr_owner[key] = {"unit": unit, "cache": cache}
                 stats["ocr_queued"] += 1
@@ -796,7 +812,8 @@ def main() -> int:
             write_text_lf(
                 payload["cache"],
                 json.dumps(
-                    {"text": text, "kept": keep, "drop_reason": reason, "error": result.get("error", "")},
+                    {"cache_version": OCR_CACHE_VERSION,
+                     "text": text, "kept": keep, "drop_reason": reason, "error": result.get("error", "")},
                     ensure_ascii=False, indent=2,
                 ) + "\n",
             )
