@@ -977,12 +977,13 @@ def main() -> int:
     ] if rows else []
     # 第四个条件：强候选仅 1 条而输出位已被弱命中塞满（len(rows) 达到 limit）——
     # 说明中文词几乎没贡献，输出被字母串同形词占据，试一次更干净的切词。
-    # 纯多词中文查询不会误触：它们的 split_sentence 结果与原词表相同，被下面的
-    # ``pieces != query_terms`` 挡住。
+    # 纯多词中文查询不会误触：split_sentence 按术语表长度降序返回（与输入顺序
+    # 无关），必须按集合比较才挡得住——列表比较会把「竞价 龙头」误判成
+    # 「切出了新词」而白跑一趟等价重查（2026-08-25 审查 ⚪3）。
     saturated_by_weak = len(strong_rows) <= 1 and len(rows) >= args.limit
     if not rows or not has_prose or not strong_rows or saturated_by_weak:
         pieces = split_sentence(query)
-        if pieces and pieces != query_terms:
+        if pieces and set(pieces) != set(query_terms):
             retry = " ".join(pieces)
             retried = search(connection, retry, args.source, args.author, args.limit)
             if retried:
@@ -1008,14 +1009,16 @@ def main() -> int:
     # （精准命中保持在前，证据面补宽）。limit=1 时尊重调用方意图不并。
     if 1 < args.limit and 0 < len(rows) <= 2 and len({r["document_id"] for r in rows}) == 1:
         pieces = split_sentence(query)
-        if pieces and pieces != terms_from_query(query):
+        if pieces and set(pieces) != set(terms_from_query(query)):
             extra_rows = search(
                 connection, " ".join(pieces), args.source, args.author, args.limit
             )
             seen = {r["chunk_id"] for r in rows}
             extra = [r for r in extra_rows if r["chunk_id"] not in seen]
             if extra:
-                rows = list(rows) + extra
+                # 封顶在 limit：并入是补证据面，不该让 json 消费方拿到超发条数
+                # （2026-08-25 审查 ⚪4）。截掉的是追加尾部，前缀稳定契约不受影响。
+                rows = (list(rows) + extra)[: args.limit]
                 if not args.json:
                     print(f"逐字命中较窄，已并入切词召回：{' / '.join(pieces)}\n")
     results = []

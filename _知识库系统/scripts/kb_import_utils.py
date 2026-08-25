@@ -546,16 +546,20 @@ def _run_windows_tiles(
         raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
 
 
-def _run_rapid_tiles(tile_map: dict[str, list[Path]], *, language: str) -> None:
+def _run_rapid_tiles(tile_map: dict[str, list[Path]], *, language: str) -> set[str]:
     """用 RapidOCR 就地识别每个分片，结果写成分片同名 .txt（与 Windows 路径同构）。
 
     RapidOCR 模型随包自带、纯 CPU 推理、不联网。``language`` 参数仅为保持与
     Windows 路径相同的调用形状，RapidOCR 的中英混模型不区分语言。
+    返回识别失败的分片文件名集合——单片失败会留下空 txt（文件存在、
+    missing 计不到），调用方必须把它并进 error 字段，否则内容静默丢失
+    只剩 stderr 一行（2026-08-25 审查 ⚪2）。
     """
     import numpy as np
     from PIL import Image
 
     engine = _rapid_engine()
+    failed: set[str] = set()
     for tile_outputs in tile_map.values():
         for tile_path in tile_outputs:
             try:
@@ -569,6 +573,8 @@ def _run_rapid_tiles(tile_map: dict[str, list[Path]], *, language: str) -> None:
                 # （2026-08-24 审计 B 项：此前单片异常会炸掉整批导入）
                 print(f"rapid 分片识别失败 {tile_path.name}: {exc}", file=sys.stderr)
                 write_text_lf(tile_path.with_suffix(".txt"), "")
+                failed.add(tile_path.name)
+    return failed
 
 
 @lru_cache(maxsize=1)
@@ -673,8 +679,18 @@ def ocr_images(
                     }
                 continue
 
-            _run_rapid_tiles(tile_map, language=language)
+            rapid_failed = _run_rapid_tiles(tile_map, language=language)
             rapid_merged = {key: read_key(key) for key in tile_map}
+
+            def error_parts(key: str, missing: int) -> str:
+                """拼该图的错误标记：缺分片输出 + rapid 单片失败（空 txt 计不到 missing）。"""
+                parts = []
+                n_failed = sum(1 for p in tile_map[key] if p.name in rapid_failed)
+                if missing:
+                    parts.append(f"missing_tile_outputs: {missing}")
+                if n_failed:
+                    parts.append(f"rapid_tile_failed: {n_failed}")
+                return "; ".join(parts)
 
             if chosen_engine == "rapid":
                 # 兜底：rapid 失灵（没字/拉丁汤）的图用 Windows 重跑——整批攒齐后
@@ -695,7 +711,7 @@ def ocr_images(
                             merged = alt
                     results[key] = {
                         "text": merged,
-                        "error": f"missing_tile_outputs: {missing}" if missing else "",
+                        "error": error_parts(key, missing),
                         "tiles": len(tile_map[key]),
                     }
                 continue
@@ -708,7 +724,7 @@ def ocr_images(
                 merged = win_text if cjk_count(win_text) > cjk_count(rap_text) else rap_text
                 results[key] = {
                     "text": merged,
-                    "error": f"missing_tile_outputs: {missing}" if missing else "",
+                    "error": error_parts(key, missing),
                     "tiles": len(tile_map[key]),
                 }
         finally:
