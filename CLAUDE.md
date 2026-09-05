@@ -862,6 +862,9 @@ v2.0 模型4 改名「情绪流循环原则」（「情绪流」郁金香 71 块
 
 ground truth 基准：南京路文本层页还原率 Windows 40.2% vs Rapid **92.4%**（`_bench_ocr.py`）。
 
+坏块率现值以 `reports/ocr_quality_report.md` 为准（`python _知识库系统/scripts/report_ocr_quality.py`
+重新生成；2026-09-05 实测：chart 0% / course 0% / nj 截图 11.4% / tulip 18.5% / paid 17.3%）。
+
 **为什么南京路/郁金香/付费层必须 dual**：全量对比发现 rapid 有两种抽样测不出的失败——
 ①**半读**：《题材是否抬头》只认出页面一角（453/4198 字），18 个可信片段 0% 存留；
 ②**假汉字乱码**：郁金香美图长截图输出「写K不_TT」式乱码，字数虚高。失灵判据

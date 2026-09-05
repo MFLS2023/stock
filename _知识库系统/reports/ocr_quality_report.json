@@ -1,0 +1,85 @@
+{
+  "date": "2026-09-05",
+  "layers": [
+    {
+      "layer": "boduanzhimen/chart_ocr",
+      "label": "K线图 OCR",
+      "total": 586,
+      "bad": 0,
+      "rate": 0.0,
+      "samples": []
+    },
+    {
+      "layer": "aizaibingchuan/course_ocr",
+      "label": "课程讲义 OCR",
+      "total": 13,
+      "bad": 0,
+      "rate": 0.0,
+      "samples": []
+    },
+    {
+      "layer": "nanjinglu_bian/screenshot_ocr",
+      "label": "南京路截图 OCR",
+      "total": 228,
+      "bad": 26,
+      "rate": 11.4,
+      "samples": [
+        {
+          "chunk_id": "nanjinglu-c0bf0cd2860c-p006-c01",
+          "length": 1200
+        },
+        {
+          "chunk_id": "nanjinglu-554254de485c-p002-c01",
+          "length": 1200
+        },
+        {
+          "chunk_id": "nanjinglu-554254de485c-p002-c02",
+          "length": 1200
+        }
+      ]
+    },
+    {
+      "layer": "tulip_garden/image_ocr",
+      "label": "郁金香截图 OCR",
+      "total": 696,
+      "bad": 129,
+      "rate": 18.5,
+      "samples": [
+        {
+          "chunk_id": "tulip-4dff27e4b75f-p002-c01",
+          "length": 1200
+        },
+        {
+          "chunk_id": "tulip-4dff27e4b75f-p007-c05",
+          "length": 1200
+        },
+        {
+          "chunk_id": "tulip-ecfb26a9b797-p002-c02",
+          "length": 1200
+        }
+      ]
+    },
+    {
+      "layer": "boduanzhimen/paid_article",
+      "label": "付费扫描页",
+      "total": 531,
+      "bad": 92,
+      "rate": 17.3,
+      "samples": [
+        {
+          "chunk_id": "boduanzhimen-paid-87a5ab88a659-p001-c04",
+          "length": 1000
+        },
+        {
+          "chunk_id": "boduanzhimen-paid-50ee183b101e-p001-c01",
+          "length": 994
+        },
+        {
+          "chunk_id": "boduanzhimen-paid-c25d0f48de8d-p001-c02",
+          "length": 982
+        }
+      ]
+    }
+  ],
+  "unlisted_ocr_layers": []
+}

@@ -21,6 +21,8 @@ sources:
     primary_locator: page_timestamp
     pipeline: transcript_with_speakers
     adapter: specialized_fulibei
+    last_import_at: '2026-08-02'
+    # 2026-08-24 的 chunks.jsonl 变更来自 mark_fulibei_chitchat.py（22 块标记），不是重导。
     notes: 多人直播或连麦文字稿，保留嘉宾、说话人、页码和时间戳。
 
   - id: nanjinglu_bian
@@ -54,6 +56,7 @@ sources:
     primary_locator: section_image
     pipeline: word_plus_ordered_ocr
     adapter: specialized_tulip
+    last_import_at: '2026-08-24'
     notes: Word 正文与大量截图并存，必须恢复图片顺序和图文关系，视觉内容需回看原图。
 
   # id 用作者身份而非资料载体：飞书只是这批资料的导出格式，换个载体来源还是同一个人。
@@ -68,6 +71,7 @@ sources:
     primary_locator: date_time_message_number
     pipeline: speaker_time_aware_html
     adapter: specialized_feishu_chat
+    last_import_at: '2026-08-02'
     author: 我有上将潘凤
     format_counts:
       .html: 1
@@ -89,6 +93,7 @@ sources:
     primary_locator: paragraph_section
     pipeline: wechat_markdown_with_comment_replies
     adapter: specialized_aizaibingchuan
+    last_import_at: '2026-08-24'
     author: 爱在冰川
     # 2026-08-04 增量：用户补下载 2023 三季度缺失的 .md，按同一套规则筛出 71 篇入库，
     # 2584 -> 2655。另有 9 篇第三方 PDF/docx 汇编在 爱在冰川\额外资料\，
@@ -110,6 +115,7 @@ sources:
     primary_locator: paragraph_number
     pipeline: docx_method_articles
     adapter: specialized_kongkonglong
+    last_import_at: '2026-08-11'
     author: 主升龙头空空龙
     upstream_path: C:\Users\20577\Documents\炒股\主升龙头空空龙
     last_import_summary:
@@ -137,6 +143,7 @@ sources:
     primary_locator: date_section_image
     pipeline: wechat_md_plus_paid_pdf
     adapter: specialized_boduanzhimen
+    last_import_at: '2026-08-24'
     author: 波段之门
     # 三件必须专用适配器的事（通用导入器会出错）：
     #   ① 一篇文章五份拷贝：md/html/mhtml/docx/pdf 同源，只认 md，其余登记为 alternate_formats
