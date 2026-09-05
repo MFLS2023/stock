@@ -284,6 +284,13 @@ FIELD_CAPS = {"text": 8, "title": 3, "author": 2, "topics": 3}
 # 共 22 块），仍可检索但在字段层扣 3 分——实测「龙头」top1 曾是「姐姐别做运动了」。
 CHUNK_TYPE_BONUS = {"curated_method": 5.0, "conflict": 2.0, "chitchat": -3.0}
 
+# 同一篇文章以 jpg（纯 OCR）和 pdf（自带文本层）两个源文件并存时，两份块的命中
+# 分通常完全相同，最终由 chunk_id 字典序决胜——jpg 版 id 恰好更小（031f… < 8d42…），
+# 错字版就系统性压住干净版（2026-08-25 价值审计实测：弱转强查询 OCR 版排 #1）。
+# 给带原生文本层的块一个小的第三层加成：同分时干净版必在前；OCR 版若真命中了
+# 更多字段/词（分差 > 0.25）仍会赢，不被这个加成翻盘。测试夹具无此列，需防御访问。
+EXTRACTION_EMBEDDED_BONUS = 0.25
+
 
 # 两套折叠口径的名字。选哪套**由词长决定**（fold_kind_for()），不由内容决定——
 # 因为它要与该词实际走的那条召回路径的大小写行为一致，而路径就是按词长分的。
@@ -548,6 +555,9 @@ def field_hit_score(folds: FieldFolds, terms: tuple[FoldedTerm, ...]) -> float:
     conflict +2.0。人工整理的方法卡和冲突卡比原始转录更值得先看，这是第三层的
     实际排序因素，不只是"字段命中"。
 
+    **原生文本层加成（EXTRACTION_EMBEDDED_BONUS）也在这层计入：** 同一篇文档的
+    文本层块与 OCR 块同分竞争时文本层在前（见常量处的注释）。
+
     收 FieldFolds 而不是 sqlite3.Row：折叠结果按行缓存，三个评分函数共用同一份，
     同一字段同一口径在一行上只折一次（见 FieldFolds 的文档）。
     """
@@ -560,7 +570,10 @@ def field_hit_score(folds: FieldFolds, terms: tuple[FoldedTerm, ...]) -> float:
         for term in terms:
             haystack = term.haystack(raw, folds, field)
             score += min(haystack.count(term.folded), cap) * weight
-    return score + CHUNK_TYPE_BONUS.get(folds.row["chunk_type"], 0.0)
+    score += CHUNK_TYPE_BONUS.get(folds.row["chunk_type"], 0.0)
+    if "extraction_method" in folds.row.keys() and folds.row["extraction_method"] == "embedded":
+        score += EXTRACTION_EMBEDDED_BONUS
+    return score
 
 
 def prose_hit(folds: FieldFolds, terms: tuple[FoldedTerm, ...]) -> int:
@@ -730,6 +743,11 @@ def _demote_homograph_noise(
 
 def search(connection: sqlite3.Connection, query: str, source: str | None, author: str | None, limit: int):
     """SPEC 2.2 的召回层（阶段 2）+ 评分与确定性排序层（阶段 3）。
+
+    **这是底层原语，不带任何兜底**：整句零命中重切、"弱相关占满"重试、逐字命中
+    并入这些用户保障都只在 ``main()``（CLI）里。生产调用一律走 CLI——直接调
+    search() 拿到的是未兜底的原始排序（2026-09-05 全项目 review 确认：本函数
+    在生产代码里没有 CLI 之外的消费方，测试除外）。
 
     召回仍是两条路径，取决于有没有短词：
 
