@@ -65,3 +65,17 @@ desktop.ini
 
 # --- 编码损坏的备份文件 ---
 *.invalid-encoding.bak
+
+# --- 实验脚本与临时目录（2026-09-06 全项目 review 后归档规则）---
+# 下划线/ocr_test 开头的 scripts 是诊断与引擎试验脚本（A/B 基准的正式版是
+# _bench_ocr.py / _bench_engine_ab.py，已入库）；_tmp_* 是抓取/解析临时目录；
+# .spec-workflow 是工具生成目录；data/_backup_* 是数据目录的本机快照。
+# 一律留本机不进版本控制。.Codex/ 与根目录零散截图不在此列——那是留痕和用户文件。
+_tmp_*/
+.spec-workflow/
+_知识库系统/data/_backup_*/
+_知识库系统/scripts/_diag_*.py
+_知识库系统/scripts/_verify_*.py
+_知识库系统/scripts/_test_*.py
+_知识库系统/scripts/ocr_test_*.py
+_知识库系统/scripts/ocr_tulip_*.py
